@@ -5,11 +5,13 @@ import { Storage } from '@google-cloud/storage'
 import mime from 'mime-types'
 import Redis from 'ioredis'
 
-const publisher = new Redis('')
+
+const publisher = new Redis(process.env.REDIS_URL as string);
 
 const storage = new Storage({
-    //todo: add credentials
-})
+    projectId: process.env.PROJECT_ID,
+    credentials: JSON.parse(process.env.GCP_SERVICE_ACCOUNT as string),
+});
 
 const BUCKET_NAME = 'vercel-clone-outputs'
 const PROJECT_ID = process.env.PROJECT_ID
@@ -30,7 +32,7 @@ async function init() {
         publishLog(data.toString())
     })
 
-    p.stdout?.on('error', function (data) {
+    p.stderr?.on('data', function (data) {
         console.log('Error', data.toString())
         publishLog(`error: ${data.toString()}`)
     })
