@@ -1,26 +1,20 @@
-const { exec } = require('child_process')
-const path = require('path')
-const fs = require('fs')
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3')
-const mime = require('mime-types')
-const Redis = require('ioredis')
-
+import { exec } from 'child_process'
+import path from 'path'
+import fs from 'fs'
+import { Storage } from '@google-cloud/storage'
+import mime from 'mime-types'
+import Redis from 'ioredis'
 
 const publisher = new Redis('')
 
-
-const s3Client = new S3Client({
-    region: '',
-    credentials: {
-        accessKeyId: '',
-        secretAccessKey: ''
-    }
+const storage = new Storage({
+    //todo: add credentials
 })
 
+const BUCKET_NAME = 'vercel-clone-outputs'
 const PROJECT_ID = process.env.PROJECT_ID
 
-
-function publishLog(log) {
+function publishLog(log: string) {
     publisher.publish(`logs:${PROJECT_ID}`, JSON.stringify({ log }))
 }
 
@@ -31,12 +25,12 @@ async function init() {
 
     const p = exec(`cd ${outDirPath} && npm install && npm run build`)
 
-    p.stdout.on('data', function (data) {
+    p.stdout?.on('data', function (data) {
         console.log(data.toString())
         publishLog(data.toString())
     })
 
-    p.stdout.on('error', function (data) {
+    p.stdout?.on('error', function (data) {
         console.log('Error', data.toString())
         publishLog(`error: ${data.toString()}`)
     })
@@ -48,21 +42,23 @@ async function init() {
         const distFolderContents = fs.readdirSync(distFolderPath, { recursive: true })
 
         publishLog(`Starting to upload`)
+
+        const bucket = storage.bucket(BUCKET_NAME);
+
         for (const file of distFolderContents) {
-            const filePath = path.join(distFolderPath, file)
+            const filePath = path.join(distFolderPath, file as string)
             if (fs.lstatSync(filePath).isDirectory()) continue;
 
             console.log('uploading', filePath)
             publishLog(`uploading ${file}`)
 
-            const command = new PutObjectCommand({
-                Bucket: 'vercel-clone-outputs',
-                Key: `__outputs/${PROJECT_ID}/${file}`,
-                Body: fs.createReadStream(filePath),
-                ContentType: mime.lookup(filePath)
+            const destination = `__outputs/${PROJECT_ID}/${file}`
+
+            await bucket.upload(filePath, {
+                destination: destination,
+                contentType: mime.lookup(filePath) || 'application/octet-stream'
             })
 
-            await s3Client.send(command)
             publishLog(`uploaded ${file}`)
             console.log('uploaded', filePath)
         }
@@ -70,5 +66,6 @@ async function init() {
         console.log('Done...')
     })
 }
+
 
 init()
