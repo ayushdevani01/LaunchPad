@@ -1,22 +1,17 @@
-FROM ubuntu:focal
+FROM node:20-slim
 
-RUN apt-get update
-RUN apt-get install -y curl
-RUN curl -sL https://deb.nodesource.com/setup_20.x | bash -
-RUN apt-get upgrade -y
-RUN apt-get install -y nodejs
-
-RUN apt-get install git -y
+RUN apt-get update && apt-get install -y git
 
 WORKDIR /home/app
 
-COPY main.sh main.sh
-COPY script.js script.js
+COPY script.ts script.ts
+COPY tsconfig.json tsconfig.json
 COPY package*.json .
 
 RUN npm install
 
-RUN chmod +x main.sh
-RUN chmod +x script.js
+RUN npm run build
 
-ENTRYPOINT [ "/home/app/main.sh" ]
+RUN chmod +x dist/script.js
+
+ENTRYPOINT [ "/bin/sh", "-c", "git clone $GIT_REPOSITORY__URL /home/app/output && exec node dist/script.js" ]
