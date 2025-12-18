@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Launchpad
 
 Launchpad is a Vercel-like platform that simplifies application deployment. It enables users to deploy projects directly from GitHub URLs, automating the build and hosting process.
@@ -41,3 +42,6 @@ A scalable fleet of ephemeral Docker containers managed by AWS ECS. Each deploym
 ### Reverse Proxy
 A specialized service that routes incoming HTTP requests to the appropriate S3 storage location. It resolves subdomains (e.g., project-name.localhost) to the specific project folder in the S3 bucket, delivering the correct index.html and assets to the end-user.
 
+=======
+# LaunchPad
+>>>>>>> origin/main
