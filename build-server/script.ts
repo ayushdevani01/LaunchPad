@@ -9,12 +9,12 @@ import Redis from 'ioredis'
 const publisher = new Redis(process.env.REDIS_URL as string);
 
 const storage = new Storage({
-    projectId: process.env.PROJECT_ID,
+    projectId: process.env.GCP_PROJECT_ID,
     credentials: JSON.parse(process.env.GCP_SERVICE_ACCOUNT as string),
 });
 
-const BUCKET_NAME = 'vercel-clone-outputs'
-const PROJECT_ID = process.env.PROJECT_ID
+const BUCKET_NAME = process.env.BUCKET_NAME as string;
+const PROJECT_ID = process.env.CLIENT_PROJECT_ID;
 
 function publishLog(log: string) {
     publisher.publish(`logs:${PROJECT_ID}`, JSON.stringify({ log }))
