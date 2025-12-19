@@ -1,0 +1,21 @@
+{
+    "name": "logs-service",
+    "version": "1.0.0",
+    "description": "Redis pub/sub + Socket.io log streaming service",
+    "main": "dist/index.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "dev": "ts-node index.ts"
+    },
+    "dependencies": {
+        "dotenv": "^16.3.1",
+        "ioredis": "^5.3.2",
+        "socket.io": "^4.7.4"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.2",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.7.2"
+    }
+}

@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+
+  redis:
+    image: redis:7-alpine
+    container_name: launchpad-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - launchpad-network
+    restart: on-failure
+
+  api-server:
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile
+    container_name: launchpad-api
+    ports:
+      - "9000:9000"
+    environment:
+      - PORT=9000
+      - CLOUD_RUN_JOB_PATH=${CLOUD_RUN_JOB_PATH}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
+    volumes:
+      - ./service-account.json:/app/service-account.json:ro
+    networks:
+      - launchpad-network
+    restart: on-failure
+
+  logs-service:
+    build:
+      context: ./logs-service
+      dockerfile: Dockerfile
+    container_name: launchpad-logs
+    ports:
+      - "9002:9002"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - SOCKET_PORT=9002
+    networks:
+      - launchpad-network
+    depends_on:
+      - redis
+    restart: on-failure
+
+  reverse-proxy:
+    build:
+      context: ./gcs-reverse-proxy
+      dockerfile: Dockerfile
+    container_name: launchpad-proxy
+    ports:
+      - "8000:8000"
+    environment:
+      - BASE_PATH=${BASE_PATH}
+    networks:
+      - launchpad-network
+    restart: on-failure
+
+networks:
+  launchpad-network:
+    driver: bridge
+    name: launchpad-network
+
+volumes:
+  redis-data:
