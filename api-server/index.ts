@@ -1,85 +1,64 @@
 import express from 'express'
 import { generateSlug } from 'random-word-slugs'
-import { ECSClient, RunTaskCommand } from '@aws-sdk/client-ecs'
-import { Server } from 'socket.io'
-import Redis from 'ioredis'
+import { JobsClient } from '@google-cloud/run'
+import dotenv from 'dotenv'
+
+dotenv.config()
 
 const app = express()
-const PORT = 9000
+const PORT = process.env.PORT || 9000
 
-const subscriber = new Redis('')
-
-const io = new Server({ cors: { origin: '*' } })
-
-io.on('connection', socket => {
-    socket.on('subscribe', channel => {
-        socket.join(channel)
-        socket.emit('message', `Joined ${channel}`)
-    })
-})
-
-io.listen(9002)
-console.log('Socket Server 9002')
-
-const ecsClient = new ECSClient({
-    region: '',
-    credentials: {
-        accessKeyId: '',
-        secretAccessKey: ''
-    }
-})
-
-const config = {
-    CLUSTER: '',
-    TASK: ''
-}
+const jobsClient = new JobsClient()
 
 app.use(express.json())
 
 app.post('/project', async (req, res) => {
     const { gitURL, slug } = req.body
+
+    if (!gitURL) {
+        return res.status(400).json({ error: 'gitURL is required' })
+    }
+
     const projectSlug = slug ? slug : generateSlug()
 
-    const command = new RunTaskCommand({
-        cluster: config.CLUSTER,
-        taskDefinition: config.TASK,
-        launchType: 'FARGATE',
-        count: 1,
-        networkConfiguration: {
-            awsvpcConfiguration: {
-                assignPublicIp: 'ENABLED',
-                subnets: ['', '', ''],
-                securityGroups: ['']
+    try {
+
+        const jobPath = process.env.CLOUD_RUN_JOB_PATH as string
+
+        const [execution] = await jobsClient.runJob({
+            name: jobPath,
+            overrides: {
+                containerOverrides: [
+                    {
+                        env: [
+                            { name: 'GIT_REPOSITORY__URL', value: gitURL },
+                            { name: 'CLIENT_PROJECT_ID', value: projectSlug }
+                        ]
+                    }
+                ]
             }
-        },
-        overrides: {
-            containerOverrides: [
-                {
-                    name: 'builder-image',
-                    environment: [
-                        { name: 'GIT_REPOSITORY__URL', value: gitURL },
-                        { name: 'PROJECT_ID', value: projectSlug }
-                    ]
-                }
-            ]
-        }
-    })
+        })
 
-    await ecsClient.send(command);
+        console.log(`Build started for project: ${projectSlug}`)
+        console.log(`Execution name: ${execution.name}`)
 
-    return res.json({ status: 'queued', data: { projectSlug, url: `http://${projectSlug}.localhost:8000` } })
-
+        return res.json({
+            status: 'queued',
+            data: {
+                projectSlug,
+                url: `http://${projectSlug}.localhost:8000`,
+                executionName: execution.name
+            }
+        })
+    } catch (error) {
+        console.error('Failed to start Cloud Run Job:', error)
+        return res.status(500).json({ error: 'Failed to start build' })
+    }
 })
 
-async function initRedisSubscribe() {
-    console.log('Subscribed to logs....')
-    subscriber.psubscribe('logs:*')
-    subscriber.on('pmessage', (pattern, channel, message) => {
-        io.to(channel).emit('message', message)
-    })
-}
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok' })
+})
 
-
-initRedisSubscribe()
-
-app.listen(PORT, () => console.log(`API Server Running..${PORT}`))
+app.listen(PORT, () => console.log(`API Server running on port ${PORT}`))
