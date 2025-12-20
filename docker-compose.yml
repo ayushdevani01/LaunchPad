@@ -25,6 +25,7 @@ services:
       - PORT=9000
       - CLOUD_RUN_JOB_PATH=${CLOUD_RUN_JOB_PATH}
       - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
+      - REDIS_URL=${REDIS_URL}
     volumes:
       - ./service-account.json:/app/service-account.json:ro
     networks:
