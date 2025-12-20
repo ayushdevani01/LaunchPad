@@ -32,7 +32,8 @@ app.post('/project', async (req, res) => {
                     {
                         env: [
                             { name: 'GIT_REPOSITORY__URL', value: gitURL },
-                            { name: 'CLIENT_PROJECT_ID', value: projectSlug }
+                            { name: 'CLIENT_PROJECT_ID', value: projectSlug },
+                            { name: 'REDIS_URL', value: process.env.REDIS_URL }
                         ]
                     }
                 ]
