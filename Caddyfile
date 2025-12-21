@@ -1,3 +1,7 @@
+{
+    email mihirgoswami2006@gmail.com
+}
+
 # API Server
 api.launch-pad.dev {
     reverse_proxy api-server:9000
@@ -8,7 +12,13 @@ logs.launch-pad.dev {
     reverse_proxy logs-service:9002
 }
 
-# USer's deployed projects
+# User's deployed projects
 *.launch-pad.dev {
+    tls {
+        dns namedotcom {
+            token {$NAMEDOTCOM_TOKEN}
+            user {$NAMEDOTCOM_USER}
+        }
+    }
     reverse_proxy gcs-reverse-proxy:8000
 }
