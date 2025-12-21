@@ -1,0 +1,14 @@
+# API Server
+api.launch-pad.dev {
+    reverse_proxy api-server:9000
+}
+
+# Logs-WebSocket Service
+logs.launch-pad.dev {
+    reverse_proxy logs-service:9002
+}
+
+# USer's deployed projects
+*.launch-pad.dev {
+    reverse_proxy gcs-reverse-proxy:8000
+}
