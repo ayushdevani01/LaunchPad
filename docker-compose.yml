@@ -64,8 +64,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - NAMEDOTCOM_TOKEN=${NAMEDOTCOM_TOKEN}
-      - NAMEDOTCOM_USER=${NAMEDOTCOM_USER}
+      - CF_API_TOKEN=${CF_API_TOKEN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
