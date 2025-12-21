@@ -17,5 +17,5 @@ logs.launch-pad.dev {
     tls {
         dns cloudflare {env.CF_API_TOKEN}
     }
-    reverse_proxy gcs-reverse-proxy:8000
+    reverse_proxy reverse-proxy:8000
 }
