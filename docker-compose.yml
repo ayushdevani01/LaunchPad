@@ -19,8 +19,6 @@ services:
       context: ./api-server
       dockerfile: Dockerfile
     container_name: launchpad-api
-    ports:
-      - "9000:9000"
     environment:
       - PORT=9000
       - CLOUD_RUN_JOB_PATH=${CLOUD_RUN_JOB_PATH}
@@ -37,8 +35,6 @@ services:
       context: ./logs-service
       dockerfile: Dockerfile
     container_name: launchpad-logs
-    ports:
-      - "9002:9002"
     environment:
       - REDIS_URL=redis://redis:6379
       - SOCKET_PORT=9002
@@ -53,12 +49,28 @@ services:
       context: ./gcs-reverse-proxy
       dockerfile: Dockerfile
     container_name: launchpad-proxy
-    ports:
-      - "8000:8000"
     environment:
       - BASE_PATH=${BASE_PATH}
     networks:
       - launchpad-network
+    restart: on-failure
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: launchpad-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - launchpad-network
+    depends_on:
+      - api-server
+      - logs-service
+      - reverse-proxy
     restart: on-failure
 
 networks:
@@ -68,3 +80,7 @@ networks:
 
 volumes:
   redis-data:
+  caddy-data:
+  caddy-config:
+
+
