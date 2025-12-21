@@ -15,10 +15,7 @@ logs.launch-pad.dev {
 # User's deployed projects
 *.launch-pad.dev {
     tls {
-        dns namedotcom {
-            token {$NAMEDOTCOM_TOKEN}
-            user {$NAMEDOTCOM_USER}
-        }
+        dns cloudflare {env.CF_API_TOKEN}
     }
     reverse_proxy gcs-reverse-proxy:8000
 }
