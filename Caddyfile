@@ -1,5 +1,5 @@
 # API Server
-api.launch-pad.dev {
+launch-pad.dev {
     reverse_proxy api-server:9000
 }
 
