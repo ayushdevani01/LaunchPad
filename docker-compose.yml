@@ -56,11 +56,16 @@ services:
     restart: on-failure
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
     container_name: launchpad-gateway
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - NAMEDOTCOM_TOKEN=${NAMEDOTCOM_TOKEN}
+      - NAMEDOTCOM_USER=${NAMEDOTCOM_USER}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
