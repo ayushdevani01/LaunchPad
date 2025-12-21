@@ -47,7 +47,7 @@ app.post('/project', async (req, res) => {
             status: 'queued',
             data: {
                 projectSlug,
-                url: `http://${projectSlug}.localhost:8000`,
+                url: `http://${projectSlug}.launch-pad.dev`,
                 executionName: execution.name
             }
         })
