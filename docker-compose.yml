@@ -19,6 +19,8 @@ services:
       context: ./api-server
       dockerfile: Dockerfile
     container_name: launchpad-api
+    ports:
+      - "9000:9000"
     environment:
       - PORT=9000
       - CLOUD_RUN_JOB_PATH=${CLOUD_RUN_JOB_PATH}
@@ -28,6 +30,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL}
       - FRONTEND_URL=${FRONTEND_URL}
     volumes:
