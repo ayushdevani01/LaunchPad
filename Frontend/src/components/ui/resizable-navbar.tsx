@@ -233,8 +233,8 @@ export const MobileNavToggle = ({
 
 export const NavbarLogo = () => {
   return (
-    <a
-      href="#"
+    <Link
+      href="/"
       className="relative z-20 mr-4 flex items-center space-x-2 px-2 py-1 text-sm font-normal text-white"
     >
       <img
@@ -244,9 +244,36 @@ export const NavbarLogo = () => {
         height={30}
       />
       <span className="font-medium text-white">Lauch Pad</span>
-    </a>
+    </Link>
   );
 };
+
+import { useAuth } from "@/context/AuthContext";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+export const NavbarAuth = () => {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+
+  if (user) {
+    return null;
+  }
+
+  return (
+    <div className="flex items-center gap-4">
+      <Link href="/login" className="text-sm font-medium text-white hover:text-purple-400 transition-colors">
+        Login
+      </Link>
+      <Link
+        href="/register"
+        className="px-4 py-2 rounded-md bg-white text-black text-sm font-bold hover:bg-gray-200 transition-colors shadow-[0_0_24px_rgba(34,_42,_53,_0.06),_0_1px_1px_rgba(0,_0,_0,_0.05),_0_0_0_1px_rgba(34,_42,_53,_0.04),_0_0_4px_rgba(34,_42,_53,_0.08),_0_16px_68px_rgba(47,_48,_55,_0.05),_0_1px_0_rgba(255,_255,_255,_0.1)_inset]"
+      >
+        Sign Up
+      </Link>
+    </div>
+  )
+}
 
 export const NavbarButton = ({
   href,
