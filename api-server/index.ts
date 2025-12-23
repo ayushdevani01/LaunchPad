@@ -1,65 +1,33 @@
 import express from 'express'
-import { generateSlug } from 'random-word-slugs'
-import { JobsClient } from '@google-cloud/run'
+import cors from 'cors'
 import dotenv from 'dotenv'
-
 dotenv.config()
+
+import { connectDB } from './src/lib/db'
+import authRoutes from './src/routes/auth'
+import projectRoutes from './src/routes/projects'
+
 
 const app = express()
 const PORT = process.env.PORT || 9000
 
-const jobsClient = new JobsClient()
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://launch-pad.dev'
+app.use(cors({
+    origin: [FRONTEND_URL, 'http://localhost:3000'],
+    credentials: true,
+}))
 
 app.use(express.json())
 
-app.post('/project', async (req, res) => {
-    const { gitURL, slug } = req.body
+app.use('/auth', authRoutes)
+app.use('/projects', projectRoutes)
 
-    if (!gitURL) {
-        return res.status(400).json({ error: 'gitURL is required' })
-    }
-
-    const projectSlug = slug ? slug : generateSlug()
-
-    try {
-
-        const jobPath = process.env.CLOUD_RUN_JOB_PATH as string
-
-        const [execution] = await jobsClient.runJob({
-            name: jobPath,
-            overrides: {
-                containerOverrides: [
-                    {
-                        env: [
-                            { name: 'GIT_REPOSITORY__URL', value: gitURL },
-                            { name: 'CLIENT_PROJECT_ID', value: projectSlug },
-                            { name: 'REDIS_URL', value: process.env.REDIS_URL }
-                        ]
-                    }
-                ]
-            }
-        })
-
-        console.log(`Build started for project: ${projectSlug}`)
-        console.log(`Execution name: ${execution.name}`)
-
-        return res.json({
-            status: 'queued',
-            data: {
-                projectSlug,
-                url: `http://${projectSlug}.launch-pad.dev`,
-                executionName: execution.name
-            }
-        })
-    } catch (error) {
-        console.error('Failed to start Cloud Run Job:', error)
-        return res.status(500).json({ error: 'Failed to start build' })
-    }
-})
-
-// Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ status: 'ok' })
 })
 
-app.listen(PORT, () => console.log(`API Server running on port ${PORT}`))
+connectDB()
+    .then(() => {
+        app.listen(PORT, () => console.log(`API Server running on port ${PORT}`))
+    })
