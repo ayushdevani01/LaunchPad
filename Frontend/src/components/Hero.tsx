@@ -22,18 +22,32 @@ export const Hero = () => {
         <div className="flex justify-center mt-8">
           <div className="inline-flex relative">
             <p className='text-xl text-center max-w-md'>Deploy your frontend applications effortlessly. Powered by Google Cloud Platform, Docker, Redis, and Cloudflare DNS for maximum performance and reliability.</p>
-            <motion.div className='absolute right-[478px] top-[40px] hidden sm:inline'
-              drag
-              dragSnapToOrigin
-
+            <motion.div
+              className='absolute right-[478px] top-[40px] hidden sm:inline'
+              animate={{ y: [0, -15, 0] }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
             >
-              <Image src={CursorImage} alt="cursor" height={200} width={200} className='max-w-none' draggable="false" />
+              <motion.div drag dragSnapToOrigin>
+                <Image src={CursorImage} alt="cursor" height={200} width={200} className='max-w-none' draggable="false" />
+              </motion.div>
             </motion.div>
-            <motion.div className='absolute top-[40px] left-[498px] hidden sm:inline'
-              drag
-              dragSnapToOrigin
+            <motion.div
+              className='absolute top-[40px] left-[498px] hidden sm:inline'
+              animate={{ y: [0, 15, 0] }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: "easeInOut",
+                delay: 0.5
+              }}
             >
-              <Image src={MessageImage} alt="cursor" height={200} width={200} className='max-w-none' draggable="false" />
+              <motion.div drag dragSnapToOrigin>
+                <Image src={MessageImage} alt="cursor" height={200} width={200} className='max-w-none' draggable="false" />
+              </motion.div>
             </motion.div>
           </div>
         </div>

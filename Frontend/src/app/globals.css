@@ -6,7 +6,73 @@
     html {
         scroll-behavior: smooth;
     }
+
     body {
         @apply bg-black text-white;
+    }
+}
+
+.loader-wrap {
+    position: fixed;
+    z-index: 9999;
+    height: 100vh;
+    width: 100%;
+    display: flex;
+    overflow: hidden;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    top: 0;
+    left: 0;
+}
+
+.loader-wrap svg {
+    position: absolute;
+    top: 0;
+    width: 100vw;
+    height: 110vh;
+}
+
+.loader-wrap .loader-wrap-heading {
+    z-index: 20;
+    position: relative;
+    overflow: hidden;
+    height: 150px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.loader-wrap .loader-wrap-heading span {
+    overflow: hidden;
+    display: block;
+    height: 100%;
+}
+
+.loader-wrap .loader-wrap-heading h1 {
+    font-size: 100px;
+    z-index: 20;
+    color: #fff;
+    text-transform: uppercase;
+    font-weight: 700;
+    font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+    letter-spacing: -0.025em;
+    margin: 0;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+    .loader-wrap svg {
+        width: 200vw;
+        margin-left: -50vw;
+    }
+
+    .loader-wrap .loader-wrap-heading {
+        height: 80px;
+    }
+
+    .loader-wrap .loader-wrap-heading h1 {
+        font-size: 40px;
     }
 }
