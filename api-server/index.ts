@@ -18,7 +18,7 @@ const allowedOrigins = [
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://launch-pad.dev'
 app.use(cors({
-    origin: [FRONTEND_URL, 'allowedOrigins'],
+    origin: [FRONTEND_URL, ...allowedOrigins],
     credentials: true,
 }))
 
