@@ -94,7 +94,7 @@ export default function LoginPage() {
 
                         <div className="flex flex-col gap-3">
                             <a
-                                href="https://api.launch-pad.dev/auth/google"
+                                href={`${process.env.NEXT_PUBLIC_API_URL}/auth/google`}
                                 className="w-full h-12 bg-white/5 border border-white/10 rounded-xl font-bold text-lg hover:bg-white/10 transition-colors flex items-center justify-center gap-2 text-white"
                             >
                                 <svg className="w-5 h-5" viewBox="0 0 24 24">
@@ -118,7 +118,7 @@ export default function LoginPage() {
                                 Google
                             </a>
                             <a
-                                href="https://api.launch-pad.dev/auth/github"
+                                href={`${process.env.NEXT_PUBLIC_API_URL}/auth/github`}
                                 className="w-full h-12 bg-white/5 border border-white/10 rounded-xl font-bold text-lg hover:bg-white/10 transition-colors flex items-center justify-center gap-2 text-white"
                             >
                                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
