@@ -2,11 +2,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 
-const logos = [
-  "https://res.cloudinary.com/dl2adjye7/image/upload/v1716817722/Amazon_icon.svg_a4qmtg.png",
-  "https://res.cloudinary.com/dl2adjye7/image/upload/v1716800282/Apple_logo_black.svg_seeetv.png",
-  "https://res.cloudinary.com/dl2adjye7/image/upload/v1716800359/WISE.L-b3d3de3c_rexehe.png"
-];
+// GitHub Integration logos (top card)
+import githubLogo from '../assets/bento-icons/github_logo_icon_229278.webp';
+import gitLogo from '../assets/bento-icons/Git.png';
+import nodejsLogo from '../assets/bento-icons/NodeJS.png';
+
+// Cloud-Powered Hosting logos (bottom card)
+import dockerLogo from '../assets/bento-icons/docker.png';
+import gcpLogo from '../assets/bento-icons/GCP.png';
+import redisLogo from '../assets/bento-icons/redis.png';
+
+// Top card logos (GitHub Integration)
+const logos = [githubLogo, gitLogo, nodejsLogo];
+
+// Bottom card logos (Cloud-Powered Hosting)
+const hostingLogos = [dockerLogo, gcpLogo, redisLogo];
 
 const lineWidth = 80;
 const lineHeight = 2;
@@ -15,8 +25,8 @@ const LogoBeam = () => {
   return (
     <div className="flex items-center justify-center min-h-52">
       <div className="relative flex items-center">
-        <div className="bg-[#000] border border-white/30  rounded-2xl flex items-center justify-center w-14 h-14 p-4">
-          <img src={logos[0]} alt="Logo 1" className="filter invert brightness-0" />
+        <div className="bg-[#000] border border-white/30  rounded-2xl flex items-center justify-center w-20 h-20 p-3">
+          <img src={logos[0].src} alt="GitHub" className="w-full h-full object-contain" />
         </div>
         <div className="relative" style={{ width: `${lineWidth}px`, height: `${lineHeight}px`, backgroundColor: '#FFFFFF', overflow: 'hidden' }}>
           <motion.div
@@ -32,8 +42,8 @@ const LogoBeam = () => {
             style={{ willChange: 'transform' }}
           />
         </div>
-        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-16 h-16 p-4 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
-          <img src={logos[1]} alt="Logo 2" className="filter invert brightness-0" />
+        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-24 h-24 p-3 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
+          <img src={logos[1].src} alt="Git" className="w-full h-full object-contain" />
           <motion.div
             className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-30"
             initial={{ x: '-100%' }}
@@ -61,8 +71,8 @@ const LogoBeam = () => {
             style={{ willChange: 'transform' }}
           />
         </div>
-        <div className="bg-black border border-white/30 rounded-2xl flex items-center justify-center w-14 h-14 p-4">
-          <img src={logos[2]} alt="Logo 3" className="filter invert brightness-0" />
+        <div className="bg-black border border-white/30 rounded-2xl flex items-center justify-center w-20 h-20 p-3">
+          <img src={logos[2].src} alt="Node.js" className="w-full h-full object-contain" />
         </div>
       </div>
     </div>
@@ -118,8 +128,8 @@ const AWSIcon = () => {
   return (
     <div className="flex flex-col justify-center h-full items-center relative">
       <div className="flex flex-row gap-8 justify-center h-full items-center relative">
-        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-16 h-16 p-4 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
-          <img src={logos[0]} alt="Logo 2" className="filter invert brightness-0" />
+        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-24 h-24 p-3 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
+          <img src={hostingLogos[0].src} alt="Docker" className="w-full h-full object-contain" />
           <motion.div
             className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-30"
             initial={{ x: '-100%' }}
@@ -133,8 +143,8 @@ const AWSIcon = () => {
             style={{ willChange: 'transform' }}
           />
         </div>
-        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-16 h-16 p-4 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
-          <img src={logos[1]} alt="Logo 2" className="filter invert brightness-0" />
+        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-24 h-24 p-3 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
+          <img src={hostingLogos[1].src} alt="Google Cloud" className="w-full h-full object-contain" />
           <motion.div
             className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-30"
             initial={{ x: '-100%' }}
@@ -148,8 +158,8 @@ const AWSIcon = () => {
             style={{ willChange: 'transform' }}
           />
         </div>
-        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-16 h-16 p-4 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
-          <img src={logos[2]} alt="Logo 2" className="filter invert brightness-0" />
+        <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-24 h-24 p-3 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
+          <img src={hostingLogos[2].src} alt="Redis" className="w-full h-full object-contain" />
           <motion.div
             className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-30"
             initial={{ x: '-100%' }}
@@ -167,8 +177,8 @@ const AWSIcon = () => {
 
 
       <div className="text-left p-6 mt-4">
-        <h1 className="text-white text-2xl font-bold mb-2">GCP Infrastructure</h1>
-        <p className="text-gray-400 text-lg">Powered by Google Cloud Platform for industry-leading reliability.</p>
+        <h1 className="text-white text-2xl font-bold mb-2">Cloud-Powered Hosting</h1>
+        <p className="text-gray-400 text-lg">Every deployment runs on Google Cloud Run with automatic scaling and high availability.</p>
       </div>
     </div>
   );
@@ -211,10 +221,10 @@ const BentoBox1 = () => {
           <div className="flex flex-col justify-between h-full">
             <div className="mb-4 px-6 mt-6">
               <div className="flex justify-between items-center mb-6 pb-2">
-                <h2 className="text-white/70 text-xl">Sales Data</h2>
+                <h2 className="text-white/70 text-xl">Deployment Stats</h2>
                 <div className="flex items-center">
                   <div className="h-1 bg-black w-8 rounded-lg"></div>
-                  <span className="ml-2 text-white/70 text-sm">Growth</span>
+                  <span className="ml-2 text-white/70 text-sm">Success Rate</span>
                 </div>
               </div>
               <div ref={chartRef} className="relative w-full mt-12" style={{ height: chartHeight }}>
@@ -266,8 +276,8 @@ const BentoBox1 = () => {
               </div>
             </div>
             <div className="text-left p-6 mt-4">
-              <h1 className="text-white text-2xl font-bold mb-2">Real-time Analytics</h1>
-              <p className="text-white/70 text-lg">Gain insights into your application performance with our built-in analytics dashboard. Track visitors, bandwidth, and more.</p>
+              <h1 className="text-white text-2xl font-bold mb-2">Live Build Logs</h1>
+              <p className="text-white/70 text-lg">Monitor your deployments in real-time with streaming build logs. Track build progress, identify errors, and debug faster.</p>
             </div>
           </div>
         </CardWithEffect>
@@ -276,8 +286,8 @@ const BentoBox1 = () => {
             <div className="flex flex-col justify-center h-full">
               <LogoBeam />
               <div className="text-left p-6">
-                <h1 className="text-white text-2xl font-bold mb-2">Modern Stack</h1>
-                <p className="text-white/70 text-lg">Built on top of Docker, Redis, and Cloud Run. We use the best tools to ensure your site is always up and fast.</p>
+                <h1 className="text-white text-2xl font-bold mb-2">GitHub Integration</h1>
+                <p className="text-white/70 text-lg">Connect your GitHub repository and deploy with a single click. We automatically detect your framework and build settings.</p>
               </div>
             </div>
           </CardWithEffect>
