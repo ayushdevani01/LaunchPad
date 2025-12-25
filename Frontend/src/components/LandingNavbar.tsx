@@ -9,7 +9,6 @@ import {
     MobileNavHeader,
     MobileNavToggle,
     MobileNavMenu,
-    // NavbarAuth,
 } from "@/components/ui/resizable-navbar";
 import { useState } from "react";
 
@@ -34,17 +33,13 @@ export function LandingNavbar() {
     return (
         <div className="sticky top-0 z-[5000] w-full py-4">
             <Navbar>
-                {/* Desktop Navigation */}
                 <NavBody>
                     <NavbarLogo />
                     <NavItems items={navItems} />
                     <div className="flex items-center gap-4">
-                        {/* <NavbarAuth /> */}
                         <NavbarButton variant="primary" href="/launch">Launch Project</NavbarButton>
                     </div>
                 </NavBody>
-
-                {/* Mobile Navigation */}
                 <MobileNav>
                     <MobileNavHeader>
                         <NavbarLogo />

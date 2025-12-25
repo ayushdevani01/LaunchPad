@@ -20,13 +20,10 @@ export default function Home() {
       <div className="overflow-x-hidden">
         <Hero />
         <LogoTicker />
-
         <Features />
-
         <ProductShowcase />
         <FAQs />
         <Pricing />
-
         <CallToAction />
       </div>
       <Footer />

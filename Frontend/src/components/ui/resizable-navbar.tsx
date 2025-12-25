@@ -10,7 +10,6 @@ import {
 
 import React, { useRef, useState } from "react";
 import logo from "../../../public/launchpad-logo.PNG";
-// import logobg from "../../../public/launchpad-logo-bgremoved.PNG";
 
 interface NavbarProps {
   children: React.ReactNode;
@@ -69,7 +68,7 @@ export const Navbar = ({ children, className }: NavbarProps) => {
   return (
     <motion.div
       ref={ref}
-      // IMPORTANT: Change this to class of `fixed` if you want the navbar to be fixed
+     
       className={cn("w-full", className)}
     >
       {React.Children.map(children, (child) =>

@@ -37,3 +37,13 @@ export async function register(email: string, username: string, password: string
     }
     return res.json()
 }
+
+export async function getProject(slug: string) {
+    const res = await fetchWithAuth(`/projects/${slug}`)
+    if (!res.ok) {
+        throw new Error('Failed to fetch project')
+    }
+    const data = await res.json()
+    return data
+}
+
