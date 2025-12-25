@@ -3,7 +3,7 @@ import Bentodemo from './bentogrid';
 export const Features = () => {
   return (
 
-    <div className="bg-black text-white py-[72px] sm:py-24 ">
+    <div id="features" className="bg-black text-white py-[72px] sm:py-24 ">
 
       <div className="container">
         <h2 className="text-center font-bold text-5xl sm:text-6xl tracking-tighter">Everything you need </h2>
@@ -14,8 +14,6 @@ export const Features = () => {
         </div>
         <div className="flex flex-col items-center justify-center sm:flex-row gap-4 mt-32">
           <Bentodemo />
-
-
         </div>
 
       </div>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { motion } from 'framer-motion'
 
 interface PricingTabProps {
   yearly: boolean
@@ -20,7 +21,6 @@ export function PricingTab(props: PricingTabProps) {
       <div className="relative flex flex-col h-full p-6 rounded-2xl bg-black border border-white/30 shadow shadow-black/80">
         {props.popular && (
           <div className="absolute top-0 right-0 mr-6 -mt-4">
-            <div className="inline-flex items-center text-xs font-semibold py-1.5 px-3 bg-emerald-500 text-white rounded-full shadow-sm shadow-slate-950/5">Most Popular</div>
           </div>
         )}
         <div className="mb-5">
@@ -31,10 +31,17 @@ export function PricingTab(props: PricingTabProps) {
             <span className="text-white/70 font-medium">/mo</span>
           </div>
           <div className="text-sm text-white/70 mb-5">{props.planDescription}</div>
-          <a className="w-full inline-flex justify-center whitespace-nowrap rounded-lg bg-[#5D2CA8] px-3.5 py-2.5 text-sm font-medium text-white shadow-sm shadow-indigo-950/10 hover:bg-[#5D2CA2] focus-visible:outline-none focus-visible:ring focus-visible:ring-slate-600 transition-colors duration-150" href="#0">
-            Purchase Plan
-          </a>
         </div>
+        <motion.button
+          whileTap={{ scale: 0.98 }}
+          disabled={true}
+          className={`mt-8 w-full py-4 px-8 rounded-full font-semibold text-lg transition-all duration-300 shadow-lg ${props.popular
+            ? "bg-gradient-to-r from-[#9560EB] to-[#7c3aed] text-white hover:shadow-purple-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+            : "bg-white/10 text-white hover:bg-white/20 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            }`}
+        >
+          {props.planName === "Pro" || props.planName === "Enterprise" ? "Coming Soon" : "Owned"}
+        </motion.button>
         <div className="text-slate-200 font-medium mb-3">Includes:</div>
         <ul className="text-slate-400 text-sm space-y-3 grow">
           {props.features.map((feature, index) => {
@@ -59,7 +66,6 @@ export default function PricingTable() {
   return (
     <div>
 
-      {/* Pricing toggle */}
       <div className="flex justify-center max-w-[14rem] m-auto mb-8 lg:mb-16">
         <div className="relative flex w-full p-1 bg-black rounded-full">
           <span className="absolute inset-0 m-1 pointer-events-none" aria-hidden="true">
@@ -72,7 +78,7 @@ export default function PricingTable() {
 
       <div className="max-w-sm mx-auto grid gap-6 lg:grid-cols-3 items-start lg:max-w-none">
 
-        {/* Pricing tab 1 */}
+        
         <PricingTab
           yearly={isAnnual}
           planName="Hobby"
@@ -85,7 +91,6 @@ export default function PricingTable() {
             'Automatic SSL',
           ]} />
 
-        {/* Pricing tab 2 */}
         <PricingTab
           yearly={isAnnual}
           popular={true}
@@ -100,7 +105,6 @@ export default function PricingTable() {
             'Analytics',
           ]} />
 
-        {/* Pricing tab 3 */}
         <PricingTab
           yearly={isAnnual}
           planName="Enterprise"

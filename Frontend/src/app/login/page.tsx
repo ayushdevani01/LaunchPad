@@ -132,7 +132,7 @@ export default function LoginPage() {
                     <p className="mt-8 text-center text-sm text-white/70">
                         Not a member?{' '}
                         <Link href="/register" className="font-semibold leading-6 text-[#A46EDB] hover:text-[#B48CDE] transition-colors">
-                            Start a 14 day free trial
+                            Create Account
                         </Link>
                     </p>
                 </motion.div>

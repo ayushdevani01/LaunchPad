@@ -30,11 +30,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const storedUser = localStorage.getItem('user')
 
             if (token && storedUser) {
-                // Optimistically set user from localStorage
                 setUser(JSON.parse(storedUser))
-
-                // Verify token validity by making a test request (optional, but good practice)
-                // For now we'll trust the token exists until a request fails (handled in api.ts)
             }
             setLoading(false)
         }

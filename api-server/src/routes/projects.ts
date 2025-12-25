@@ -28,8 +28,7 @@ router.post('/', async (req: Request, res: Response) => {
         const project = await Project.create({
             slug: projectSlug,
             gitUrl: gitURL,
-            userId: userId,
-            status: 'queued'
+            userId: userId
         })
 
         const jobPath = process.env.CLOUD_RUN_JOB_PATH as string
@@ -37,7 +36,7 @@ router.post('/', async (req: Request, res: Response) => {
         const [execution] = await jobsClient.runJob({
             name: jobPath,
             overrides: {
-                containerOverrides: [
+                containerOverrides: [   
                     {
                         env: [
                             { name: 'GIT_REPOSITORY__URL', value: gitURL },
@@ -53,7 +52,6 @@ router.post('/', async (req: Request, res: Response) => {
         console.log(`Execution name: ${execution.name}`)
 
         return res.json({
-            status: 'queued',
             data: {
                 projectSlug,
                 url: `https://${projectSlug}.launch-pad.dev`,

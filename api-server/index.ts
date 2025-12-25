@@ -11,10 +11,14 @@ import projectRoutes from './src/routes/projects'
 const app = express()
 const PORT = process.env.PORT || 9000
 
+const allowedOrigins = [
+    'https://launch-pad.dev',
+    'http://localhost:3000',
+];
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://launch-pad.dev'
 app.use(cors({
-    origin: [FRONTEND_URL, 'http://localhost:3000'],
+    origin: [FRONTEND_URL, 'allowedOrigins'],
     credentials: true,
 }))
 

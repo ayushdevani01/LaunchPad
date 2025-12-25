@@ -1,5 +1,5 @@
 "use client"
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { fetchWithAuth } from '../../lib/api'
 import ProtectedRoute from '../../components/ProtectedRoute'
@@ -10,17 +10,35 @@ export default function LaunchPage() {
     const [project_name, setProjectName] = useState('')
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [deployedUrl, setDeployedUrl] = useState('')
+    const [projectSlug, setProjectSlug] = useState('') 
     const [errorMsg, setErrorMsg] = useState('')
+    const [isValidating, setIsValidating] = useState(false)
+    const [validationError, setValidationError] = useState('')
+
+    const validateProjectNameLocal = (name: string) => {
+        if (!name) {
+            setValidationError('')
+            return
+        }
+        // Regex Check: Lowercase, numbers, hyphens only
+        const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+        if (!slugRegex.test(name)) {
+            setValidationError('Project name must be lowercase, alphanumeric, and can contain hyphens (but not start/end with them).')
+        } else {
+            setValidationError('')
+        }
+    }
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        if (validationError || isValidating) return
         setStatus('loading')
         setErrorMsg('')
         setDeployedUrl('')
 
         try {
             const body: any = { gitURL }
-            if (project_name.trim()) body.name = project_name.trim()
+            if (project_name.trim()) body.project_name = project_name.trim()
 
             const res = await fetchWithAuth('/projects', {
                 method: 'POST',
@@ -30,15 +48,23 @@ export default function LaunchPage() {
             const data = await res.json()
 
             if (!res.ok) {
+                if (res.status === 400 && data.error === 'Project name already taken') {
+                    setValidationError('Project name is already taken.')
+                    setStatus('idle')
+                    return
+                }
                 throw new Error(data.error || 'Failed to deploy project')
             }
 
             setStatus('success')
 
-            if (data.data?.subdomain) {
-                setDeployedUrl(`http://${data.data.subdomain}.launch-pad.dev`)
-            } else if (data.data?.customDomain) {
-                setDeployedUrl(`http://${data.data.customDomain}`)
+            const slug = data.data?.projectSlug || ''
+            setProjectSlug(slug)
+
+            if (data.data?.url) {
+                setDeployedUrl(data.data.url)
+            } else if (slug) {
+                setDeployedUrl(`https://${slug}.launch-pad.dev`)
             }
 
         } catch (err: any) {
@@ -63,7 +89,7 @@ export default function LaunchPage() {
                         <div className="flex justify-between items-center mb-6">
                             <h1 className="text-4xl sm:text-5xl font-bold tracking-tighter text-center">Deploy your Project</h1>
                         </div>
-                        <p className="text-white/70 text-center mb-8 text-lg">Enter your GitHub repository URL and we'll handle the rest.</p>
+                        <p className="text-white/70 text-center mb-8 text-lg">Enter your GitHub repository URL and we&apos;ll handle the rest.</p>
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
                             <div className="space-y-2">
@@ -86,25 +112,32 @@ export default function LaunchPage() {
                                         id="project_name"
                                         type="text"
                                         value={project_name}
-                                        onChange={(e) => setProjectName(e.target.value)}
+                                        onChange={(e) => {
+                                            const val = e.target.value
+                                            setProjectName(val)
+                                            validateProjectNameLocal(val)
+                                        }}
                                         placeholder="my-cool-project"
-                                        className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white pr-24"
+                                        className={`w-full h-14 bg-white/10 border ${validationError ? 'border-red-500' : 'border-white/10'} rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white pr-24`}
                                     />
                                     <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 text-sm font-mono hidden sm:inline-block">.launch-pad.dev</span>
                                 </div>
+                                {validationError && (
+                                    <p className="text-red-400 text-sm ml-1">{validationError}</p>
+                                )}
                             </div>
 
                             <button
-                                disabled={status === 'loading'}
+                                disabled={status === 'loading' || !!validationError || isValidating}
                                 className="bg-white text-black h-14 rounded-xl px-5 font-bold text-lg mt-2 hover:bg-gray-200 transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 {status === 'loading' ? (
                                     <>
                                         <span className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></span>
-                                        Launching...
+                                        {isValidating ? 'Validating...' : 'Launching...'}
                                     </>
                                 ) : (
-                                    '🚀 Launch Project'
+                                    'Launch Project'
                                 )}
                             </button>
                         </form>
@@ -136,8 +169,14 @@ export default function LaunchPage() {
                                     {deployedUrl}
                                 </a>
                                 <p className="text-xs text-white/50 mt-4">(It may take a few minutes for the build to complete)</p>
-                                <div className="mt-4">
-                                    <Link href="/dashboard" className="text-sm text-purple-300 hover:text-white underline">
+                                <div className="mt-4 flex gap-4 justify-center">
+                                    <Link
+                                        href={`/project/${projectSlug}`}
+                                        className="text-sm bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-500"
+                                    >
+                                        View Project Details
+                                    </Link>
+                                    <Link href="/dashboard" className="text-sm text-purple-300 hover:text-white underline flex items-center">
                                         Back to Dashboard
                                     </Link>
                                 </div>

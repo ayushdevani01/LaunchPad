@@ -4,7 +4,6 @@ import echoLogo from "../assets/images/echo.png";
 import celestialLogo from "../assets/images/celestial.png";
 import pulseLogo from "../assets/images/pulse.png";
 import apexLogo from "../assets/images/apex.png";
-import Image from 'next/image';
 import LogoCarousel from "./companylogos";
 
 const images = [
@@ -22,10 +21,7 @@ export const LogoTicker = () => {
       <div className="container">
         <h2 className="text-lg text-center text-white/70 mb-16">Built with modern technologies</h2>
         <LogoCarousel />
-
-
       </div>
-
     </div>
   )
 };

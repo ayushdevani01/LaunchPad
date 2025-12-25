@@ -1,5 +1,5 @@
 "use client"
-import appScreen from "../assets/images/product.avif";
+import appScreen from "../assets/images/Dashboard.png";
 import Image from 'next/image';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import { useEffect, useRef } from "react";
@@ -8,7 +8,6 @@ export const ProductShowcase = () => {
   const { scrollYProgress } = useScroll({
     target: appImage,
     offset: ["start end", "end end"]
-
   });
 
   const rotateX = useTransform(scrollYProgress, [0, 1], [15, 0]);
@@ -19,7 +18,7 @@ export const ProductShowcase = () => {
       <div className="container">
         <h2 className="text-center text-5xl font-bold tracking-tighter">Intuitive Interface</h2>
         <div className='max-w-xl mx-auto'>
-          <p className="text-xl text-white/70 text-center mt-5 ">Experience a seamless deployment workflow with our intuition-first dashboard. Monitor builds, manage domains, and view logs in real-time.</p>
+          <p className="text-xl text-white/70 text-center mt-5 ">Experience a seamless deployment workflow with our intuition first dashboard. Monitor builds, manage domains, and view logs in real time.</p>
         </div>
         <div className="flex justify-center">
           <motion.div
@@ -27,7 +26,6 @@ export const ProductShowcase = () => {
               opacity: opacity,
               rotateX: rotateX,
               transformPerspective: "800px",
-
             }}
           >
             <Image src={appScreen} ref={appImage} alt="app screen" className="mt-14" />
