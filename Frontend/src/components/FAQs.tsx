@@ -30,12 +30,10 @@ const items = [
 const AccordinationItem = ({ question, answer }: { question: string, answer: string }) => {
   const [isOpen, setIsOpen] = useState(false);
   return (
-
-    <div className=" py-7 border-b border-white/30" onClick={() => setIsOpen(!isOpen)}>
-      <div className="flex items-center ">
+    <div className="py-7 border-b border-white/30 cursor-pointer" onClick={() => setIsOpen(!isOpen)}>
+      <div className="flex items-center">
         <span className="flex-1 text-lg font-bold">{question}</span>
         {isOpen ? <MinusIcon /> : <PlusIcon />}
-
       </div>
       <AnimatePresence>
         {isOpen && (
@@ -44,13 +42,9 @@ const AccordinationItem = ({ question, answer }: { question: string, answer: str
             animate={{ opacity: 1, height: "auto", marginTop: '16px' }}
             exit={{ opacity: 0, height: 0, marginTop: 0 }}
           >{answer}</motion.div>
-
         )}
       </AnimatePresence>
-
     </div>
-
-
   )
 }
 

@@ -8,11 +8,13 @@ import { FAQs } from "@/components/FAQs";
 import { CallToAction } from "@/components/CallToAction";
 import { Footer } from "@/components/Footer";
 import { Pricing } from "@/components/Pricingdemo";
+import { Preloader } from "@/components/Preloader";
 
 
 export default function Home() {
   return (
     <>
+      <Preloader />
       <div className="overflow-x-hidden">
         <Banner />
       </div>
