@@ -36,7 +36,8 @@ export function LandingNavbar() {
                 <NavBody>
                     <NavbarLogo />
                     <NavItems items={navItems} />
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 sm:gap-4">
+                        <NavbarButton variant="secondary" href="/dashboard">Dashboard</NavbarButton>
                         <NavbarButton variant="primary" href="/launch">Launch Project</NavbarButton>
                     </div>
                 </NavBody>
@@ -64,7 +65,14 @@ export function LandingNavbar() {
                             </a>
                         ))}
                         <div className="flex w-full flex-col gap-4">
-                            {/* <NavbarAuth /> */}
+                            <NavbarButton
+                                onClick={() => setIsMobileMenuOpen(false)}
+                                variant="secondary"
+                                className="w-full"
+                                href="/dashboard"
+                            >
+                                Dashboard
+                            </NavbarButton>
                             <NavbarButton
                                 onClick={() => setIsMobileMenuOpen(false)}
                                 variant="primary"

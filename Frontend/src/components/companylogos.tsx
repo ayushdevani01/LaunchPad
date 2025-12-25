@@ -1,20 +1,22 @@
 import Image from 'next/image'
-import acmeLogo from "../assets/images/acme.png";
-import quantumLogo from "../assets/images/quantum.png";
-import echoLogo from "../assets/images/echo.png";
-import celestialLogo from "../assets/images/celestial.png";
-import pulseLogo from "../assets/images/pulse.png";
-import apexLogo from "../assets/images/apex.png";
+import gcpLogo from "../assets/Marquee images/GCP-remove.png";
+import mongoLogo from "../assets/Marquee images/Mongo.png";
+import cloudRunLogo from "../assets/Marquee images/cloud_run.png";
+import dockerLogo from "../assets/Marquee images/docker-removebg-preview.png";
+import nextLogo from "../assets/Marquee images/next.png";
+import redisLogo from "../assets/Marquee images/redis.png";
+import cloudflareLogo from "../assets/Marquee images/cloudflare.png";
 
 export default function LogoCarousel() {
 
   const logos = [
-  { src: acmeLogo, alt: "Acme Logo" },
-  { src: quantumLogo, alt: "Quantum Logo" },
-  { src: echoLogo, alt: "Echo Logo" },
-  { src: celestialLogo, alt: "Celestial Logo" },
-  { src: pulseLogo, alt: "Pulse Logo" },
-  { src: apexLogo, alt: "Apex Logo" },
+    { src: gcpLogo, alt: "Google Cloud Platform", size: 150 },
+    { src: mongoLogo, alt: "MongoDB", size: 150 },
+    { src: cloudRunLogo, alt: "Cloud Run", size: 150 },
+    { src: dockerLogo, alt: "Docker", size: 150 },
+    { src: nextLogo, alt: "Next.js", size: 50 },
+    { src: redisLogo, alt: "Redis", size: 150 },
+    { src: cloudflareLogo, alt: "Cloudflare", size: 150 },
   ]
 
   return (
@@ -22,14 +24,14 @@ export default function LogoCarousel() {
       <ul className="flex items-center justify-center md:justify-start [&_li]:mx-8 [&_img]:max-w-none animate-infinite-scroll">
         {logos.map((logo, index) => (
           <li key={index}>
-            <Image src={logo.src} alt={logo.alt} />
+            <Image src={logo.src} alt={logo.alt} width={logo.size} height={logo.size} className="object-contain" />
           </li>
         ))}
       </ul>
       <ul className="flex items-center justify-center md:justify-start [&_li]:mx-8 [&_img]:max-w-none animate-infinite-scroll" aria-hidden="true">
         {logos.map((logo, index) => (
           <li key={index}>
-            <Image src={logo.src} alt={logo.alt} />
+            <Image src={logo.src} alt={logo.alt} width={logo.size} height={logo.size} className="object-contain" />
           </li>
         ))}
       </ul>
