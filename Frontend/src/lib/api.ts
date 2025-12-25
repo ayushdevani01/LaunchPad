@@ -46,4 +46,3 @@ export async function getProject(slug: string) {
     const data = await res.json()
     return data
 }
-

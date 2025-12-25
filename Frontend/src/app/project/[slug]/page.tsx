@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import ProtectedRoute from '../../../components/ProtectedRoute'
-import { getProject, updateProject, deleteProject, redeployProject } from '../../../lib/api'
+import { getProject } from '../../../lib/api'
 import LogViewer from '../../../components/LogViewer'
 
 interface Project {
