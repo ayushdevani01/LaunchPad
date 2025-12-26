@@ -18,7 +18,7 @@ export const ProductShowcase = () => {
       <div className="container">
         <h2 className="text-center text-5xl font-bold tracking-tighter">Intuitive Interface</h2>
         <div className='max-w-xl mx-auto'>
-          <p className="text-xl text-white/70 text-center mt-5 ">Experience a seamless deployment workflow with our intuition first dashboard. Monitor builds, manage domains, and view logs in real time.</p>
+          <p className="text-xl text-white/70 text-center mt-5 ">Experience a seamless deployment workflow with our intuition first dashboard. Monitor builds, custom domains, and view logs in real time.</p>
         </div>
         <div className="flex justify-center">
           <motion.div

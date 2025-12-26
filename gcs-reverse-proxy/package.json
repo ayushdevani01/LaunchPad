@@ -1,5 +1,5 @@
 {
-  "name": "vercel-clone",
+  "name": "gcs-reverse-proxy",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",

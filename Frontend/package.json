@@ -1,7 +1,7 @@
 {
-  "name": "saas-landing-page-template",
+  "name": "launchpad",
   "version": "0.1.0",
-  "description": "landing page template for saas products",
+  "description": "Deploy Your React app with ease",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "next lint"
   },
-  "author": "Mudunuri Bhaskara Karthikeya Varma <karthikmudunuri999@gmail.com>",
+  "author": "LaunchPad",
   "license": "MIT",
   "dependencies": {
     "@tabler/icons-react": "^3.36.0",
