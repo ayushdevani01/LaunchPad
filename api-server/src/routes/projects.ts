@@ -10,12 +10,21 @@ const jobsClient = new JobsClient()
 router.use(authMiddleware)
 
 router.post('/', async (req: Request, res: Response) => {
-    const { gitURL, project_name } = req.body
+    const { gitURL, project_name, sourceDir } = req.body
     const userId = res.locals.authUser.userId
 
     if (!gitURL) {
         return res.status(400).json({ error: 'gitURL is required' })
     }
+
+    //GitHub URL only
+    const githubRegex = /^https?:\/\/(www\.)?github\.com\/[\w.-]+\/[\w.-]+/i
+    if (!githubRegex.test(gitURL)) {
+        return res.status(400).json({ error: 'Only GitHub repository URLs are supported' })
+    }
+
+    // strip leading/trailing slashes
+    const normalizedSourceDir = sourceDir?.trim().replace(/^\/+|\/+$/g, '') || ''
 
     const projectSlug = project_name?.trim() || generateSlug()
 
@@ -28,6 +37,7 @@ router.post('/', async (req: Request, res: Response) => {
         const project = await Project.create({
             slug: projectSlug,
             gitUrl: gitURL,
+            sourceDir: normalizedSourceDir || undefined,
             userId: userId
         })
 
@@ -36,12 +46,13 @@ router.post('/', async (req: Request, res: Response) => {
         const [execution] = await jobsClient.runJob({
             name: jobPath,
             overrides: {
-                containerOverrides: [   
+                containerOverrides: [
                     {
                         env: [
                             { name: 'GIT_REPOSITORY__URL', value: gitURL },
                             { name: 'CLIENT_PROJECT_ID', value: projectSlug },
-                            { name: 'REDIS_URL', value: process.env.REDIS_URL }
+                            { name: 'REDIS_URL', value: process.env.REDIS_URL },
+                            { name: 'SOURCE_DIR', value: normalizedSourceDir }
                         ]
                     }
                 ]

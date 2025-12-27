@@ -8,12 +8,14 @@ import Link from 'next/link'
 export default function LaunchPage() {
     const [gitURL, setGitURL] = useState('')
     const [project_name, setProjectName] = useState('')
+    const [sourceDir, setSourceDir] = useState('')
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [deployedUrl, setDeployedUrl] = useState('')
-    const [projectSlug, setProjectSlug] = useState('') 
+    const [projectSlug, setProjectSlug] = useState('')
     const [errorMsg, setErrorMsg] = useState('')
     const [isValidating, setIsValidating] = useState(false)
     const [validationError, setValidationError] = useState('')
+    const [urlError, setUrlError] = useState('')
 
     const validateProjectNameLocal = (name: string) => {
         if (!name) {
@@ -29,8 +31,22 @@ export default function LaunchPage() {
         }
     }
 
+    const validateGitHubUrl = (url: string) => {
+        if (!url) {
+            setUrlError('')
+            return
+        }
+        const githubRegex = /^https?:\/\/(www\.)?github\.com\/[\w.-]+\/[\w.-]+/i
+        if (!githubRegex.test(url)) {
+            setUrlError('Only GitHub repository URLs are supported')
+        } else {
+            setUrlError('')
+        }
+    }
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        if (urlError) return
         if (validationError || isValidating) return
         setStatus('loading')
         setErrorMsg('')
@@ -39,6 +55,7 @@ export default function LaunchPage() {
         try {
             const body: any = { gitURL }
             if (project_name.trim()) body.project_name = project_name.trim()
+            if (sourceDir.trim()) body.sourceDir = sourceDir.trim()
 
             const res = await fetchWithAuth('/projects', {
                 method: 'POST',
@@ -100,9 +117,13 @@ export default function LaunchPage() {
                                     required
                                     value={gitURL}
                                     onChange={(e) => setGitURL(e.target.value)}
+                                    onBlur={(e) => validateGitHubUrl(e.target.value)}
                                     placeholder="https://github.com/username/repo"
-                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white"
+                                    className={`w-full h-14 bg-white/10 border ${urlError ? 'border-red-500' : 'border-white/10'} rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white`}
                                 />
+                                {urlError && (
+                                    <p className="text-red-400 text-sm ml-1">{urlError}</p>
+                                )}
                             </div>
 
                             <div className="space-y-2">
@@ -127,8 +148,21 @@ export default function LaunchPage() {
                                 )}
                             </div>
 
+                            <div className="space-y-2">
+                                <label htmlFor="sourceDir" className="text-sm font-medium text-white/80 ml-1">Source Directory (Optional)</label>
+                                <input
+                                    id="sourceDir"
+                                    type="text"
+                                    value={sourceDir}
+                                    onChange={(e) => setSourceDir(e.target.value)}
+                                    placeholder="frontend or packages/web"
+                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white"
+                                />
+                                <p className="text-white/40 text-xs ml-1">For monorepos: path to your frontend folder</p>
+                            </div>
+
                             <button
-                                disabled={status === 'loading' || !!validationError || isValidating}
+                                disabled={status === 'loading' || !!validationError || !!urlError || isValidating}
                                 className="bg-white text-black h-14 rounded-xl px-5 font-bold text-lg mt-2 hover:bg-gray-200 transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 {status === 'loading' ? (
@@ -185,6 +219,6 @@ export default function LaunchPage() {
                     </motion.div>
                 </div>
             </div>
-        </ProtectedRoute>
+        </ProtectedRoute >
     )
 }

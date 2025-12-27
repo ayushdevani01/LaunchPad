@@ -26,7 +26,15 @@ function publishLog(log: string) {
 async function init() {
     console.log('Executing script.js')
     publishLog('Build Started...')
-    const outDirPath = '/home/app/output'
+
+    const baseOutputPath = '/home/app/output'
+
+    const sourceDir = (process.env.SOURCE_DIR || '').replace(/^\/+|\/+$/g, '')
+    const outDirPath = sourceDir ? path.join(baseOutputPath, sourceDir) : baseOutputPath
+
+    if (sourceDir) {
+        publishLog(`Building from subfolder: ${sourceDir}`)
+    }
 
     const p: ChildProcess = exec(`cd ${outDirPath} && npm install && npm run build`)
 
@@ -49,32 +57,46 @@ async function init() {
         }
         console.log('Build Complete')
         publishLog(`Build Complete`)
-        const distFolderPath = '/home/app/output/build'
+
+        const possibleDirs = (process.env.BUILD_OUTPUT_DIR || 'dist,build,out,.next,public,www,output,.output,_site,public/build').split(',').map(d => d.trim())
+        let distFolderPath = ''
+
+        for (const dir of possibleDirs) {
+            const fullPath = path.join(outDirPath, dir)
+            if (fs.existsSync(fullPath) && fs.lstatSync(fullPath).isDirectory()) {
+                distFolderPath = fullPath
+                publishLog(`Found build output: ${dir}`)
+                break
+            }
+        }
+
+        if (!distFolderPath) {
+            publishLog(`Error: Build output folder not found. Checked: ${possibleDirs.join(', ')}`)
+            await publisher.quit()
+            process.exit(1)
+        }
+
         const distFolderContents = fs.readdirSync(distFolderPath, { recursive: true })
-
-        publishLog(`Starting to upload`)
-
         const bucket = storage.bucket(BUCKET_NAME)
 
-        for (const file of distFolderContents) {
+        const files = distFolderContents.filter(file => {
             const filePath = path.join(distFolderPath, file as string)
-            if (fs.lstatSync(filePath).isDirectory()) continue
+            return !fs.lstatSync(filePath).isDirectory()
+        })
 
-            console.log('uploading', filePath)
-            publishLog(`uploading ${file}`)
+        publishLog(`Uploading ${files.length} files...`)
 
+        await Promise.all(files.map(async (file) => {
+            const filePath = path.join(distFolderPath, file as string)
             const destination = `__outputs/${PROJECT_ID}/${file}`
 
             await bucket.upload(filePath, {
-                destination: destination,
+                destination,
                 contentType: mime.lookup(filePath) || 'application/octet-stream'
             })
+        }))
 
-            publishLog(`uploaded ${file}`)
-            console.log('uploaded', filePath)
-        }
-
-        publishLog(`Done`)
+        publishLog(`Uploaded ${files.length} files`)
         console.log('Done...')
 
         await publisher.quit()
