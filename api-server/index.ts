@@ -6,6 +6,7 @@ dotenv.config()
 import { connectDB } from './src/lib/db'
 import authRoutes from './src/routes/auth'
 import projectRoutes from './src/routes/projects'
+import { startReconciler } from './src/lib/reconciler'
 
 
 const app = express()
@@ -33,5 +34,7 @@ app.get('/health', (req, res) => {
 
 connectDB()
     .then(() => {
+        startReconciler()
         app.listen(PORT, () => console.log(`API Server running on port ${PORT}`))
     })
+
