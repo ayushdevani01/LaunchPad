@@ -142,7 +142,7 @@ router.get('/github', (req, res) => {
     const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID
     const REDIRECT_URI = process.env.GITHUB_CALLBACK_URL || 'http://localhost:9000/auth/github/callback'
 
-    const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=user:email`
+    const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=user:email,repo`
     res.redirect(url)
 })
 
@@ -181,7 +181,11 @@ router.get('/github/callback', async (req, res) => {
                 email: primaryEmail,
                 username: userProfile.login,
                 password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8), // Random password
+                githubToken: access_token,
             })
+        } else {
+            user.githubToken = access_token
+            await user.save()
         }
 
         const token = signToken({
