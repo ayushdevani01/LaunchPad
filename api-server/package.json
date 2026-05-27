@@ -9,7 +9,8 @@
     "dev": "ts-node index.ts"
   },
   "dependencies": {
-    "@google-cloud/run": "^1.4.0",
+    "@aws-sdk/client-ecs": "^3.500.0",
+    "@aws-sdk/client-s3": "^3.500.0",
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
