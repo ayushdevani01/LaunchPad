@@ -14,4 +14,4 @@ RUN npm run build
 
 RUN chmod +x dist/script.js
 
-ENTRYPOINT [ "/bin/sh", "-c", "git clone $GIT_REPOSITORY__URL /home/app/output && exec node dist/script.js" ]
+ENTRYPOINT [ "/bin/sh", "-c", "if [ -n \"$GITHUB_TOKEN\" ]; then GIT_URL=$(echo $GIT_REPOSITORY__URL | sed \"s|https://|https://x-access-token:$GITHUB_TOKEN@|\"); else GIT_URL=$GIT_REPOSITORY__URL; fi; git clone -b ${BRANCH:-main} \"$GIT_URL\" /home/app/output && exec node dist/script.js" ]

@@ -12,7 +12,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@google-cloud/storage": "^7.18.0",
+    "@aws-sdk/client-s3": "^3.500.0",
     "dotenv": "^17.2.3",
     "ioredis": "^5.3.2",
     "mime-types": "^2.1.35"
