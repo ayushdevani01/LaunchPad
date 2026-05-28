@@ -2,10 +2,21 @@ version: '3.8'
 
 services:
 
+  mongodb:
+    image: mongo:latest
+    container_name: launchpad-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - launchpad-network
+    restart: on-failure
+
   redis:
     image: redis:7-alpine
     container_name: launchpad-redis
-    command: redis-server --bind 0.0.0.0 --requirepass ${REDIS_PASSWORD}
+    command: redis-server --bind 0.0.0.0 --requirepass ${REDIS_PASSWORD:-redis_pass}
     ports:
       - "6379:6379"
     volumes:
@@ -14,30 +25,58 @@ services:
       - launchpad-network
     restart: on-failure
 
+  localstack:
+    image: localstack/localstack:latest
+    container_name: launchpad-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./localstack-init:/etc/localstack/init/ready.d"
+    networks:
+      - launchpad-network
+    restart: on-failure
+
   api-server:
     build:
       context: ./api-server
       dockerfile: Dockerfile
+      args:
+        INSTALL_DOCKER: "true"
     container_name: launchpad-api
     ports:
       - "9000:9000"
     environment:
       - PORT=9000
-      - CLOUD_RUN_JOB_PATH=${CLOUD_RUN_JOB_PATH}
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
-      - REDIS_URL=${REDIS_URL}
-      - MONGODB_URI=${MONGODB_URI}
-      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_URL=${REDIS_URL:-redis://:redis_pass@redis:6379}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/launchpad}
+      - JWT_SECRET=${JWT_SECRET:-jwt_secret_phrase}
       - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL}
-      - FRONTEND_URL=${FRONTEND_URL}
+      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL:-http://localhost:9000/auth/github/callback}
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-mock}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-mock}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME:-launchpad-assets}
+      - AWS_ECS_CLUSTER=${AWS_ECS_CLUSTER:-local}
+      - AWS_ECS_TASK_DEFINITION=${AWS_ECS_TASK_DEFINITION:-mock-task}
+      - AWS_ECS_SUBNETS=${AWS_ECS_SUBNETS:-mock-subnet}
+      - AWS_ECS_SECURITY_GROUPS=${AWS_ECS_SECURITY_GROUPS:-mock-sg}
+      - AWS_ECS_CONTAINER_NAME=${AWS_ECS_CONTAINER_NAME:-build-server}
+      - AWS_ENDPOINT=${AWS_ENDPOINT:-http://localstack:4566}
+      - MOCK_ECS=${MOCK_ECS:-true}
+      - DOCKER_NETWORK=launchpad-network
     volumes:
-      - ./service-account.json:/app/service-account.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - launchpad-network
+    depends_on:
+      - mongodb
+      - redis
+      - localstack
     restart: on-failure
 
   logs-service:
@@ -45,24 +84,35 @@ services:
       context: ./logs-service
       dockerfile: Dockerfile
     container_name: launchpad-logs
+    ports:
+      - "9002:9002"
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_pass}@redis:6379
       - SOCKET_PORT=9002
+      - JWT_SECRET=${JWT_SECRET:-jwt_secret_phrase}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/launchpad}
     networks:
       - launchpad-network
     depends_on:
       - redis
+      - mongodb
     restart: on-failure
 
   reverse-proxy:
     build:
-      context: ./gcs-reverse-proxy
+      context: ./s3-reverse-proxy
       dockerfile: Dockerfile
     container_name: launchpad-proxy
+    ports:
+      - "8000:8000"
     environment:
-      - BASE_PATH=${BASE_PATH}
+      - BASE_PATH=${BASE_PATH:-http://localstack:4566/launchpad-assets}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/launchpad}
     networks:
       - launchpad-network
+    depends_on:
+      - mongodb
+      - localstack
     restart: on-failure
 
   caddy:
@@ -74,7 +124,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - CF_API_TOKEN=${CF_API_TOKEN}
+      - CF_API_TOKEN=${CF_API_TOKEN:-mock}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -94,5 +144,6 @@ networks:
 
 volumes:
   redis-data:
+  mongo-data:
   caddy-data:
   caddy-config:
