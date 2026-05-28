@@ -21,7 +21,7 @@ export const Hero = () => {
         </div>
         <div className="flex justify-center mt-8">
           <div className="inline-flex relative">
-            <p className='text-xl text-center max-w-md'>Deploy your frontend applications effortlessly. Powered by Google Cloud Platform, Docker, Redis, and Cloudflare DNS for maximum performance and reliability.</p>
+            <p className='text-xl text-center max-w-md'>Deploy your frontend applications effortlessly. Powered by AWS (ECS & S3), Docker, Redis, and Cloudflare DNS for maximum performance and reliability.</p>
             <motion.div
               className='absolute right-[478px] top-[40px] hidden sm:inline'
               animate={{ y: [0, -15, 0] }}

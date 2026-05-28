@@ -144,7 +144,10 @@ const AWSIcon = () => {
           />
         </div>
         <div className="relative bg-black border-2 border-white/70 rounded-2xl flex items-center justify-center w-24 h-24 p-3 overflow-hidden shadow-[0_0_15px_5px_#dbe0e2]">
-          <img src={hostingLogos[1].src} alt="Google Cloud" className="w-full h-full object-contain" />
+          <svg className="w-full h-full text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17.5 19A3.5 3.5 0 0 0 21 15.5c0-2.79-2.54-4.5-5-4.5-.47 0-.89.09-1.3.27A5 5 0 0 0 5 13c0 .18.01.36.03.54A3.5 3.5 0 0 0 1 17c0 2.2 1.8 4 4 4h12.5" />
+            <text x="12" y="17" fontSize="5.5" fontWeight="bold" fill="currentColor" textAnchor="middle" stroke="none">AWS</text>
+          </svg>
           <motion.div
             className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-transparent via-white to-transparent opacity-30"
             initial={{ x: '-100%' }}
@@ -178,7 +181,7 @@ const AWSIcon = () => {
 
       <div className="text-left p-6 mt-4">
         <h1 className="text-white text-2xl font-bold mb-2">Cloud-Powered Hosting</h1>
-        <p className="text-gray-400 text-lg">Every deployment runs on Google Cloud Run with automatic scaling and high availability.</p>
+        <p className="text-gray-400 text-lg">Every deployment runs as an AWS ECS Fargate task with automatic scaling and high availability.</p>
       </div>
     </div>
   );

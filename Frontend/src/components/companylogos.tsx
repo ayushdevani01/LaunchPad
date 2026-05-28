@@ -1,7 +1,5 @@
 import Image from 'next/image'
-import gcpLogo from "../assets/Marquee images/GCP-remove.png";
 import mongoLogo from "../assets/Marquee images/Mongo.png";
-import cloudRunLogo from "../assets/Marquee images/cloud_run.png";
 import dockerLogo from "../assets/Marquee images/docker-removebg-preview.png";
 import nextLogo from "../assets/Marquee images/next.png";
 import redisLogo from "../assets/Marquee images/redis.png";
@@ -10,9 +8,7 @@ import cloudflareLogo from "../assets/Marquee images/cloudflare.png";
 export default function LogoCarousel() {
 
   const logos = [
-    { src: gcpLogo, alt: "Google Cloud Platform", size: 150 },
     { src: mongoLogo, alt: "MongoDB", size: 150 },
-    { src: cloudRunLogo, alt: "Cloud Run", size: 150 },
     { src: dockerLogo, alt: "Docker", size: 150 },
     { src: nextLogo, alt: "Next.js", size: 50 },
     { src: redisLogo, alt: "Redis", size: 150 },

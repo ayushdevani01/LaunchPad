@@ -23,7 +23,7 @@ const items = [
   {
     question: "What technologies power Launchpad?",
     answer:
-      "We use Google Cloud Platform for scalable infrastructure, Docker for containerized builds, Redis for real-time logs, and Cloudflare for fast, secure global content delivery.",
+      "We use Amazon Web Services (AWS) for scalable infrastructure, Docker for containerized builds, Redis for real-time logs, and Cloudflare for fast, secure global content delivery.",
   },
 ];
 
