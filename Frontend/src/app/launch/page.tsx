@@ -6,23 +6,137 @@ import ProtectedRoute from '../../components/ProtectedRoute'
 import Link from 'next/link'
 
 export default function LaunchPage() {
-    const [gitURL, setGitURL] = useState('')
+    const [repos, setRepos] = useState<any[]>([])
+    const [selectedRepo, setSelectedRepo] = useState<any | null>(null)
+    const [branches, setBranches] = useState<string[]>([])
+    
     const [project_name, setProjectName] = useState('')
     const [sourceDir, setSourceDir] = useState('')
+    const [installCommand, setInstallCommand] = useState('')
+    const [buildCommand, setBuildCommand] = useState('')
+    const [outputDir, setOutputDir] = useState('')
+    const [branch, setBranch] = useState('main')
+    const [envVars, setEnvVars] = useState<{ key: string, value: string }[]>([])
+    const [showAdvanced, setShowAdvanced] = useState(false)
+    
+    // Detection state
+    const [detecting, setDetecting] = useState(false)
+    const [detectionResult, setDetectionResult] = useState<any | null>(null)
+
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [deployedUrl, setDeployedUrl] = useState('')
     const [projectSlug, setProjectSlug] = useState('')
     const [errorMsg, setErrorMsg] = useState('')
-    const [isValidating, setIsValidating] = useState(false)
     const [validationError, setValidationError] = useState('')
-    const [urlError, setUrlError] = useState('')
+
+    // Load GitHub repositories on mount
+    useEffect(() => {
+        const loadRepos = async () => {
+            try {
+                const res = await fetchWithAuth('/projects/github/repos')
+                if (res.ok) {
+                    const data = await res.json()
+                    setRepos(data.repos || [])
+                } else {
+                    setErrorMsg('Failed to load GitHub repositories. Please ensure you are logged in via GitHub.')
+                }
+            } catch (err) {
+                console.error(err)
+                setErrorMsg('Error loading repositories.')
+            }
+        }
+        loadRepos()
+    }, [])
+
+    // Load branches when repository is selected
+    useEffect(() => {
+        if (!selectedRepo) {
+            setBranches([])
+            setBranch('main')
+            return
+        }
+
+        const [owner, repo] = selectedRepo.fullName.split('/')
+        const loadBranches = async () => {
+            try {
+                const res = await fetchWithAuth(`/projects/github/branches?owner=${owner}&repo=${repo}`)
+                if (res.ok) {
+                    const data = await res.json()
+                    setBranches(data.branches || [])
+                    if (data.branches?.includes(selectedRepo.defaultBranch)) {
+                        setBranch(selectedRepo.defaultBranch)
+                    } else if (data.branches?.length > 0) {
+                        setBranch(data.branches[0])
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to load branches', e)
+            }
+        }
+        loadBranches()
+    }, [selectedRepo])
+
+    // Framework detection hook
+    useEffect(() => {
+        if (!selectedRepo || !branch) {
+            setDetectionResult(null)
+            return
+        }
+
+        const [owner, repo] = selectedRepo.fullName.split('/')
+        const triggerDetection = async () => {
+            setDetecting(true)
+            try {
+                const res = await fetchWithAuth(`/projects/github/detect?owner=${owner}&repo=${repo}&branch=${branch}&path=${sourceDir}`)
+                if (res.ok) {
+                    const data = await res.json()
+                    const detection = data.detection
+                    setDetectionResult(detection)
+
+                    // Autofill commands if supported
+                    if (detection.supported !== 'NO') {
+                        setInstallCommand(detection.installCommand || '')
+                        setBuildCommand(detection.buildCommand || '')
+                        setOutputDir(detection.outputDir || '')
+                    } else {
+                        setInstallCommand('')
+                        setBuildCommand('')
+                        setOutputDir('')
+                    }
+                }
+            } catch (e) {
+                console.error('Failed to analyze repository', e)
+            } finally {
+                setDetecting(false)
+            }
+        }
+
+        const delayDebounce = setTimeout(() => {
+            triggerDetection()
+        }, 800)
+
+        return () => clearTimeout(delayDebounce)
+    }, [selectedRepo, branch, sourceDir])
+
+    const handleAddEnvVar = () => {
+        setEnvVars([...envVars, { key: '', value: '' }])
+    }
+
+    const handleRemoveEnvVar = (index: number) => {
+        setEnvVars(envVars.filter((_, i) => i !== index))
+    }
+
+    const handleEnvVarChange = (index: number, field: 'key' | 'value', val: string) => {
+        const updated = [...envVars]
+        updated[index][field] = val
+        setEnvVars(updated)
+    }
 
     const validateProjectNameLocal = (name: string) => {
         if (!name) {
             setValidationError('')
             return
         }
-        // Regex Check: Lowercase, numbers, hyphens only
         const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
         if (!slugRegex.test(name)) {
             setValidationError('Project name must be lowercase, alphanumeric, and can contain hyphens (but not start/end with them).')
@@ -31,31 +145,30 @@ export default function LaunchPage() {
         }
     }
 
-    const validateGitHubUrl = (url: string) => {
-        if (!url) {
-            setUrlError('')
-            return
-        }
-        const githubRegex = /^https?:\/\/(www\.)?github\.com\/[\w.-]+\/[\w.-]+/i
-        if (!githubRegex.test(url)) {
-            setUrlError('Only GitHub repository URLs are supported')
-        } else {
-            setUrlError('')
-        }
-    }
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (urlError) return
-        if (validationError || isValidating) return
+        if (!selectedRepo) return
+        if (validationError || status === 'loading') return
         setStatus('loading')
         setErrorMsg('')
         setDeployedUrl('')
 
         try {
-            const body: any = { gitURL }
-            if (project_name.trim()) body.project_name = project_name.trim()
-            if (sourceDir.trim()) body.sourceDir = sourceDir.trim()
+            const body: any = {
+                gitURL: selectedRepo.gitUrl,
+                project_name: project_name.trim() || undefined,
+                sourceDir: sourceDir.trim() || undefined,
+                installCommand: installCommand.trim() || undefined,
+                buildCommand: buildCommand.trim() || undefined,
+                outputDir: outputDir.trim() || undefined,
+                branch: branch.trim() || 'main'
+            }
+            
+            if (envVars.length > 0) {
+                body.envVars = Object.fromEntries(
+                    envVars.filter(e => e.key.trim()).map(e => [e.key.trim(), e.value.trim()])
+                )
+            }
 
             const res = await fetchWithAuth('/projects', {
                 method: 'POST',
@@ -74,15 +187,9 @@ export default function LaunchPage() {
             }
 
             setStatus('success')
-
             const slug = data.data?.projectSlug || ''
             setProjectSlug(slug)
-
-            if (data.data?.url) {
-                setDeployedUrl(data.data.url)
-            } else if (slug) {
-                setDeployedUrl(`https://${slug}.launch-pad.dev`)
-            }
+            setDeployedUrl(data.data?.url || `https://${slug}.launch-pad.dev`)
 
         } catch (err: any) {
             console.error(err)
@@ -106,26 +213,91 @@ export default function LaunchPage() {
                         <div className="flex justify-between items-center mb-6">
                             <h1 className="text-4xl sm:text-5xl font-bold tracking-tighter text-center">Deploy your Project</h1>
                         </div>
-                        <p className="text-white/70 text-center mb-8 text-lg">Enter your GitHub repository URL and we&apos;ll handle the rest.</p>
+                        <p className="text-white/70 text-center mb-8 text-lg">Select a repository from your GitHub account to deploy.</p>
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
+                            {/* Repository Selection */}
                             <div className="space-y-2">
-                                <label htmlFor="gitURL" className="text-sm font-medium text-white/80 ml-1">GitHub Repository URL</label>
-                                <input
-                                    id="gitURL"
-                                    type="url"
-                                    required
-                                    value={gitURL}
-                                    onChange={(e) => setGitURL(e.target.value)}
-                                    onBlur={(e) => validateGitHubUrl(e.target.value)}
-                                    placeholder="https://github.com/username/repo"
-                                    className={`w-full h-14 bg-white/10 border ${urlError ? 'border-red-500' : 'border-white/10'} rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white`}
-                                />
-                                {urlError && (
-                                    <p className="text-red-400 text-sm ml-1">{urlError}</p>
-                                )}
+                                <label className="text-sm font-medium text-white/80 ml-1">Select GitHub Repository</label>
+                                <select
+                                    onChange={(e) => {
+                                        const repoObj = repos.find(r => r.fullName === e.target.value)
+                                        setSelectedRepo(repoObj || null)
+                                    }}
+                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white appearance-none"
+                                >
+                                    <option value="" className="bg-black text-white/50">-- Select Repository --</option>
+                                    {repos.map((repo) => (
+                                        <option key={repo.fullName} value={repo.fullName} className="bg-black text-white">
+                                            {repo.fullName} {repo.private ? '(Private)' : ''}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
 
+                            {/* Git Branch Selection */}
+                            {selectedRepo && (
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium text-white/80 ml-1">Git Branch</label>
+                                    <select
+                                        value={branch}
+                                        onChange={(e) => setBranch(e.target.value)}
+                                        className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white appearance-none"
+                                    >
+                                        {branches.map((b) => (
+                                            <option key={b} value={b} className="bg-black text-white">
+                                                {b}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            )}
+
+                            {/* Source Directory */}
+                            <div className="space-y-2">
+                                <label htmlFor="sourceDir" className="text-sm font-medium text-white/80 ml-1">Source Directory (Optional)</label>
+                                <input
+                                    id="sourceDir"
+                                    type="text"
+                                    value={sourceDir}
+                                    onChange={(e) => setSourceDir(e.target.value)}
+                                    placeholder="frontend or packages/web"
+                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white"
+                                />
+                                <p className="text-white/40 text-xs ml-1">For monorepos: path to your frontend folder</p>
+                            </div>
+
+                            {/* Framework Detection Panel */}
+                            {detecting && (
+                                <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-center text-sm text-zinc-400 flex items-center justify-center gap-2">
+                                    <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
+                                    Analyzing repository framework...
+                                </div>
+                            )}
+
+                            {detectionResult && !detecting && (
+                                <div className={`p-5 rounded-xl border flex flex-col gap-2 ${
+                                    detectionResult.supported === 'YES' ? 'bg-green-500/10 border-green-500/25' :
+                                    detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/10 border-yellow-500/25' :
+                                    'bg-red-500/10 border-red-500/25'
+                                }`}>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm font-medium text-white/60">Detected Framework</span>
+                                        <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${
+                                            detectionResult.supported === 'YES' ? 'bg-green-500/20 text-green-300' :
+                                            detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/20 text-yellow-300' :
+                                            'bg-red-500/20 text-red-300'
+                                        }`}>
+                                            {detectionResult.framework} ({detectionResult.supported === 'YES' ? 'Supported' : detectionResult.supported === 'PARTIAL' ? 'Warnings' : 'Unsupported'})
+                                        </span>
+                                    </div>
+                                    <p className="text-xs text-zinc-400 leading-relaxed mt-1">
+                                        {detectionResult.notes}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Project Name (Domain) */}
                             <div className="space-y-2">
                                 <label htmlFor="project_name" className="text-sm font-medium text-white/80 ml-1">Project Name (Optional)</label>
                                 <div className="relative">
@@ -148,27 +320,106 @@ export default function LaunchPage() {
                                 )}
                             </div>
 
-                            <div className="space-y-2">
-                                <label htmlFor="sourceDir" className="text-sm font-medium text-white/80 ml-1">Source Directory (Optional)</label>
-                                <input
-                                    id="sourceDir"
-                                    type="text"
-                                    value={sourceDir}
-                                    onChange={(e) => setSourceDir(e.target.value)}
-                                    placeholder="frontend or packages/web"
-                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white"
-                                />
-                                <p className="text-white/40 text-xs ml-1">For monorepos: path to your frontend folder</p>
+                            {/* Advanced Settings Collapsible */}
+                            <div className="border border-white/10 rounded-xl overflow-hidden bg-white/5">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAdvanced(!showAdvanced)}
+                                    className="w-full h-12 px-5 flex items-center justify-between text-sm font-semibold text-white/80 hover:bg-white/5 transition-colors"
+                                >
+                                    <span>Advanced Build Settings</span>
+                                    <span>{showAdvanced ? '▲' : '▼'}</span>
+                                </button>
+                                {showAdvanced && (
+                                    <div className="p-5 border-t border-white/10 space-y-4">
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="space-y-1">
+                                                <label className="text-xs text-white/60">Output Directory</label>
+                                                <input
+                                                    type="text"
+                                                    value={outputDir}
+                                                    onChange={(e) => setOutputDir(e.target.value)}
+                                                    placeholder="dist"
+                                                    className="w-full h-10 bg-white/10 border border-white/10 rounded-lg px-3 text-sm focus:outline-none text-white"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs text-white/60">Install Command</label>
+                                                <input
+                                                    type="text"
+                                                    value={installCommand}
+                                                    onChange={(e) => setInstallCommand(e.target.value)}
+                                                    placeholder="npm install"
+                                                    className="w-full h-10 bg-white/10 border border-white/10 rounded-lg px-3 text-sm focus:outline-none text-white"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-white/60">Build Command</label>
+                                            <input
+                                                type="text"
+                                                value={buildCommand}
+                                                onChange={(e) => setBuildCommand(e.target.value)}
+                                                placeholder="npm run build"
+                                                className="w-full h-10 bg-white/10 border border-white/10 rounded-lg px-3 text-sm focus:outline-none text-white"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-2 pt-2">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-xs text-white/60 font-medium">Environment Variables</label>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleAddEnvVar}
+                                                    className="text-xs text-purple-400 hover:text-purple-300 underline font-medium"
+                                                >
+                                                    + Add Variable
+                                                </button>
+                                            </div>
+                                            {envVars.map((item, idx) => (
+                                                <div key={idx} className="flex gap-2 items-center">
+                                                    <input
+                                                        type="text"
+                                                        value={item.key}
+                                                        onChange={(e) => handleEnvVarChange(idx, 'key', e.target.value)}
+                                                        placeholder="KEY"
+                                                        className="flex-1 h-9 bg-white/10 border border-white/10 rounded-lg px-3 text-xs text-white focus:outline-none"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        value={item.value}
+                                                        onChange={(e) => handleEnvVarChange(idx, 'value', e.target.value)}
+                                                        placeholder="VALUE"
+                                                        className="flex-1 h-9 bg-white/10 border border-white/10 rounded-lg px-3 text-xs text-white focus:outline-none"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleRemoveEnvVar(idx)}
+                                                        className="text-red-400 hover:text-red-300 text-xs px-2"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             <button
-                                disabled={status === 'loading' || !!validationError || !!urlError || isValidating}
-                                className="bg-white text-black h-14 rounded-xl px-5 font-bold text-lg mt-2 hover:bg-gray-200 transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                disabled={
+                                    status === 'loading' || 
+                                    !selectedRepo || 
+                                    !!validationError || 
+                                    (detectionResult && detectionResult.supported === 'NO')
+                                }
+                                className="bg-white text-black h-14 rounded-xl px-5 font-bold text-lg mt-2 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 {status === 'loading' ? (
                                     <>
                                         <span className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></span>
-                                        {isValidating ? 'Validating...' : 'Launching...'}
+                                        Launching...
                                     </>
                                 ) : (
                                     'Launch Project'
@@ -206,7 +457,7 @@ export default function LaunchPage() {
                                 <div className="mt-4 flex gap-4 justify-center">
                                     <Link
                                         href={`/project/${projectSlug}`}
-                                        className="text-sm bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-500"
+                                        className="text-sm bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-500 font-medium"
                                     >
                                         View Project Details
                                     </Link>
@@ -219,6 +470,6 @@ export default function LaunchPage() {
                     </motion.div>
                 </div>
             </div>
-        </ProtectedRoute >
+        </ProtectedRoute>
     )
 }

@@ -15,8 +15,11 @@ export default function LogViewer({ slug }: LogViewerProps) {
     useEffect(() => {
        
         const socketUrl = process.env.NEXT_PUBLIC_LOGS_URL || 'http://localhost:9002'
+        const token = typeof window !== 'undefined' ? localStorage.getItem('token') || '' : ''
 
-        socketRef.current = io(socketUrl)
+        socketRef.current = io(socketUrl, {
+            auth: { token }
+        })
 
         socketRef.current.on('connect', () => {
             console.log('Connected to log service')

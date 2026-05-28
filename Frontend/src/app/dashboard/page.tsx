@@ -1,5 +1,6 @@
 "use client"
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { fetchWithAuth } from '../../lib/api'
 import ProtectedRoute from '../../components/ProtectedRoute'
@@ -15,6 +16,7 @@ interface Project {
 }
 
 export default function DashboardPage() {
+    const router = useRouter()
     const [projects, setProjects] = useState<Project[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
@@ -93,7 +95,8 @@ export default function DashboardPage() {
                             {projects.map((project) => (
                                 <div
                                     key={project._id}
-                                    className="group relative rounded-2xl border border-white/10 bg-black/40 backdrop-blur-xl p-6 transition-all hover:bg-black/60 hover:border-[#9560EB]/50 hover:shadow-2xl hover:shadow-[#9560EB]/20 block"
+                                    onClick={() => router.push(`/project/${project.slug}`)}
+                                    className="group relative rounded-2xl border border-white/10 bg-black/40 backdrop-blur-xl p-6 transition-all hover:bg-black/60 hover:border-[#9560EB]/50 hover:shadow-2xl hover:shadow-[#9560EB]/20 block cursor-pointer"
                                 >
                                     <div className="flex items-center justify-between mb-4">
                                         <h3 className="text-lg font-semibold text-white truncate pr-4">
@@ -113,10 +116,11 @@ export default function DashboardPage() {
                                                     className="hover:text-purple-400 hover:underline truncate cursor-pointer flex-1"
                                                 >
                                                     <a
-                                                        href={`http://${project.slug}.launch-pad.dev`}
+                                                        href={`https://${project.slug}.launch-pad.dev`}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
                                                         className="block"
+                                                        onClick={(e) => e.stopPropagation()}
                                                     >
                                                         {project.slug}.launch-pad.dev
                                                     </a>
