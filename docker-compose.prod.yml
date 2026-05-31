@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+
+  mongodb:
+    image: mongo:latest
+    container_name: launchpad-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - launchpad-network
+    restart: on-failure
+
+  redis:
+    image: redis:7-alpine
+    container_name: launchpad-redis
+    command: redis-server --bind 0.0.0.0 --requirepass ${REDIS_PASSWORD:-redis_pass}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - launchpad-network
+    restart: on-failure
+
+  api-server:
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile
+    container_name: launchpad-api
+    ports:
+      - "9000:9000"
+    environment:
+      - PORT=9000
+      - REDIS_URL=${REDIS_URL}
+      - MONGODB_URI=${MONGODB_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_ECS_CLUSTER=${AWS_ECS_CLUSTER}
+      - AWS_ECS_TASK_DEFINITION=${AWS_ECS_TASK_DEFINITION}
+      - AWS_ECS_SUBNETS=${AWS_ECS_SUBNETS}
+      - AWS_ECS_SECURITY_GROUPS=${AWS_ECS_SECURITY_GROUPS}
+      - AWS_ECS_CONTAINER_NAME=${AWS_ECS_CONTAINER_NAME}
+      - AWS_ENDPOINT=
+      - MOCK_ECS=false
+      - INTERNAL_API_URL=${INTERNAL_API_URL}
+    networks:
+      - launchpad-network
+    depends_on:
+      - mongodb
+      - redis
+    restart: on-failure
+
+  logs-service:
+    build:
+      context: ./logs-service
+      dockerfile: Dockerfile
+    container_name: launchpad-logs
+    ports:
+      - "9002:9002"
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
+      - SOCKET_PORT=9002
+      - JWT_SECRET=${JWT_SECRET}
+      - MONGODB_URI=${MONGODB_URI}
+    networks:
+      - launchpad-network
+    depends_on:
+      - redis
+      - mongodb
+    restart: on-failure
+
+  reverse-proxy:
+    build:
+      context: ./s3-reverse-proxy
+      dockerfile: Dockerfile
+    container_name: launchpad-proxy
+    ports:
+      - "8000:8000"
+    environment:
+      - BASE_PATH=${BASE_PATH}
+      - MONGODB_URI=${MONGODB_URI}
+    networks:
+      - launchpad-network
+    depends_on:
+      - mongodb
+    restart: on-failure
+
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    container_name: launchpad-gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - CF_API_TOKEN=${CF_API_TOKEN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - launchpad-network
+    depends_on:
+      - api-server
+      - logs-service
+      - reverse-proxy
+    restart: on-failure
+
+networks:
+  launchpad-network:
+    driver: bridge
+    name: launchpad-network
+
+volumes:
+  redis-data:
+  mongo-data:
+  caddy-data:
+  caddy-config:
