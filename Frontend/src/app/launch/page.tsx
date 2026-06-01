@@ -10,6 +10,12 @@ export default function LaunchPage() {
     const [selectedRepo, setSelectedRepo] = useState<any | null>(null)
     const [branches, setBranches] = useState<string[]>([])
     
+    const [reposLoading, setReposLoading] = useState(true)
+    const [branchesLoading, setBranchesLoading] = useState(false)
+    const [isRepoOpen, setIsRepoOpen] = useState(false)
+    const [isBranchOpen, setIsBranchOpen] = useState(false)
+    const [repoSearch, setRepoSearch] = useState('')
+
     const [project_name, setProjectName] = useState('')
     const [sourceDir, setSourceDir] = useState('')
     const [installCommand, setInstallCommand] = useState('')
@@ -32,6 +38,7 @@ export default function LaunchPage() {
     // Load GitHub repositories on mount
     useEffect(() => {
         const loadRepos = async () => {
+            setReposLoading(true)
             try {
                 const res = await fetchWithAuth('/projects/github/repos')
                 if (res.ok) {
@@ -43,6 +50,8 @@ export default function LaunchPage() {
             } catch (err) {
                 console.error(err)
                 setErrorMsg('Error loading repositories.')
+            } finally {
+                setReposLoading(false)
             }
         }
         loadRepos()
@@ -58,6 +67,7 @@ export default function LaunchPage() {
 
         const [owner, repo] = selectedRepo.fullName.split('/')
         const loadBranches = async () => {
+            setBranchesLoading(true)
             try {
                 const res = await fetchWithAuth(`/projects/github/branches?owner=${owner}&repo=${repo}`)
                 if (res.ok) {
@@ -71,6 +81,8 @@ export default function LaunchPage() {
                 }
             } catch (e) {
                 console.error('Failed to load branches', e)
+            } finally {
+                setBranchesLoading(false)
             }
         }
         loadBranches()
@@ -216,40 +228,178 @@ export default function LaunchPage() {
                         <p className="text-white/70 text-center mb-8 text-lg">Select a repository from your GitHub account to deploy.</p>
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-                            {/* Repository Selection */}
-                            <div className="space-y-2">
+                            <div className="space-y-2 relative">
                                 <label className="text-sm font-medium text-white/80 ml-1">Select GitHub Repository</label>
-                                <select
-                                    onChange={(e) => {
-                                        const repoObj = repos.find(r => r.fullName === e.target.value)
-                                        setSelectedRepo(repoObj || null)
-                                    }}
-                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white appearance-none"
+                                
+                                <style>{`
+                                    .custom-dropdown-scrollbar::-webkit-scrollbar {
+                                        width: 6px;
+                                    }
+                                    .custom-dropdown-scrollbar::-webkit-scrollbar-track {
+                                        background: transparent;
+                                    }
+                                    .custom-dropdown-scrollbar::-webkit-scrollbar-thumb {
+                                        background: rgba(149, 96, 235, 0.5);
+                                        border-radius: 99px;
+                                    }
+                                    .custom-dropdown-scrollbar::-webkit-scrollbar-thumb:hover {
+                                        background: rgba(149, 96, 235, 0.8);
+                                    }
+                                `}</style>
+
+                                {/* Custom Trigger Button */}
+                                <button
+                                    type="button"
+                                    onClick={() => setIsRepoOpen(!isRepoOpen)}
+                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
                                 >
-                                    <option value="" className="bg-black text-white/50">-- Select Repository --</option>
-                                    {repos.map((repo) => (
-                                        <option key={repo.fullName} value={repo.fullName} className="bg-black text-white">
-                                            {repo.fullName} {repo.private ? '(Private)' : ''}
-                                        </option>
-                                    ))}
-                                </select>
+                                    <span className={selectedRepo ? "text-white" : "text-white/40"}>
+                                        {selectedRepo ? selectedRepo.fullName : '-- Select Repository --'}
+                                    </span>
+                                    <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isRepoOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+                                </button>
+
+                                {isRepoOpen && (
+                                    <div 
+                                        className="fixed inset-0 z-40 bg-black/0 cursor-default" 
+                                        onClick={() => setIsRepoOpen(false)}
+                                    />
+                                )}
+
+                                {isRepoOpen && (
+                                    <div 
+                                        onWheel={(e) => e.stopPropagation()}
+                                        style={{ backgroundColor: '#000000' }}
+                                        className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.3)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
+                                    >
+                                        <div className="max-h-64 overflow-y-auto overscroll-y-contain p-2.5 flex flex-col gap-1 custom-dropdown-scrollbar">
+                                        <div className="relative mb-2 shrink-0">
+                                            <input
+                                                type="text"
+                                                value={repoSearch}
+                                                onChange={(e) => setRepoSearch(e.target.value)}
+                                                placeholder="Search repositories..."
+                                                className="w-full h-10 bg-white/5 border border-white/5 rounded-lg px-3.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#9560EB]/50 placeholder:text-white/30"
+                                                onClick={(e) => e.stopPropagation()}
+                                            />
+                                            {repoSearch && (
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setRepoSearch('')}
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40 hover:text-white"
+                                                >
+                                                    ✕
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        {reposLoading ? (
+                                            <div className="flex flex-col gap-2 p-1">
+                                                {[1, 2, 3, 4].map((n) => (
+                                                    <div key={n} className="h-10 bg-white/5 rounded-lg animate-pulse flex items-center px-3 justify-between">
+                                                        <div className="h-3.5 bg-white/10 rounded w-2/3"></div>
+                                                        <div className="h-3 bg-white/10 rounded w-10"></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (() => {
+                                            const filtered = repos.filter(r => r.fullName.toLowerCase().includes(repoSearch.toLowerCase()))
+                                            if (filtered.length === 0) {
+                                                return <div className="text-center text-sm py-5 text-white/40">No matching repositories</div>
+                                            }
+                                            return filtered.map((repo) => (
+                                                <button
+                                                    key={repo.fullName}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedRepo(repo)
+                                                        setIsRepoOpen(false)
+                                                        setRepoSearch('')
+                                                    }}
+                                                    className={`w-full h-10 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center justify-between duration-100 ${
+                                                        selectedRepo?.fullName === repo.fullName 
+                                                            ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner' 
+                                                            : 'text-white/80 hover:text-white'
+                                                    }`}
+                                                >
+                                                    <span className="truncate">{repo.fullName}</span>
+                                                    {repo.private && (
+                                                        <span className="text-[9px] bg-white/15 text-white/60 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider scale-90">Private</span>
+                                                    )}
+                                                </button>
+                                            ))
+                                        })()}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Git Branch Selection */}
                             {selectedRepo && (
-                                <div className="space-y-2">
+                                <div className="space-y-2 relative">
                                     <label className="text-sm font-medium text-white/80 ml-1">Git Branch</label>
-                                    <select
-                                        value={branch}
-                                        onChange={(e) => setBranch(e.target.value)}
-                                        className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white appearance-none"
+                                    
+                                    {/* Custom Branch Trigger Button */}
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsBranchOpen(!isBranchOpen)}
+                                        className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
                                     >
-                                        {branches.map((b) => (
-                                            <option key={b} value={b} className="bg-black text-white">
-                                                {b}
-                                            </option>
-                                        ))}
-                                    </select>
+                                        <span className="flex items-center gap-2">
+                                            {branchesLoading && <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>}
+                                            {branch}
+                                        </span>
+                                        <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isBranchOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+                                    </button>
+
+                                    {/* Dropdown Backing Click-Away Overlay */}
+                                    {isBranchOpen && (
+                                        <div 
+                                            className="fixed inset-0 z-40 bg-black/0 cursor-default" 
+                                            onClick={() => setIsBranchOpen(false)}
+                                        />
+                                    )}
+
+                                    {/* Custom Floating Dropdown Menu for Branches */}
+                                    {isBranchOpen && (
+                                        <div 
+                                            onWheel={(e) => e.stopPropagation()}
+                                            style={{ backgroundColor: '#000000' }}
+                                            className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.25)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
+                                        >
+                                            <div className="max-h-52 overflow-y-auto overscroll-y-contain p-2 flex flex-col gap-1 custom-dropdown-scrollbar">
+                                            {branchesLoading ? (
+                                                <div className="flex flex-col gap-1.5 p-1">
+                                                    {[1, 2].map((n) => (
+                                                        <div key={n} className="h-9 bg-white/5 rounded-lg animate-pulse flex items-center px-3">
+                                                            <div className="h-3 bg-white/10 rounded w-1/3"></div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            ) : branches.length === 0 ? (
+                                                <div className="text-center text-sm py-4 text-white/40">No branches loaded</div>
+                                            ) : (
+                                                branches.map((b) => (
+                                                    <button
+                                                        key={b}
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setBranch(b)
+                                                            setIsBranchOpen(false)
+                                                        }}
+                                                        className={`w-full h-9 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center duration-100 ${
+                                                            branch === b 
+                                                                ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner' 
+                                                                : 'text-white/80 hover:text-white'
+                                                        }`}
+                                                    >
+                                                        {b}
+                                                    </button>
+                                                ))
+                                            )}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             )}
 
