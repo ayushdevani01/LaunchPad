@@ -347,7 +347,14 @@ router.post('/webhook/github', async (req: Request, res: Response) => {
 
     try {
         // Find all projects watching this repository and branch
-        const projects = await Project.find({ gitUrl, branch: branchName })
+        const projects = await Project.find({
+            $or: [
+                { gitUrl: gitUrl },
+                { gitUrl: `${gitUrl}.git` },
+                { gitUrl: gitUrl.replace(/\.git$/, '') }
+            ],
+            branch: branchName
+        })
         if (projects.length === 0) {
             console.log(`[WEBHOOK] No projects found matching gitUrl: ${gitUrl}, branch: ${branchName}`)
             return res.status(200).json({ message: 'No matching projects found' })
@@ -684,6 +691,39 @@ router.get('/:slug/deployments/:deploymentId/logs', async (req: Request, res: Re
         }
         console.error('Failed to fetch logs from S3:', error)
         return res.status(500).json({ error: 'Failed to fetch logs' })
+    }
+})
+
+router.post('/:slug/redeploy', async (req: Request, res: Response) => {
+    const { slug } = req.params
+    const userId = res.locals.authUser.userId
+
+    try {
+        const project = await Project.findOne({ slug, userId })
+        if (!project) {
+            return res.status(404).json({ error: 'Project not found' })
+        }
+
+        const user = await User.findById(userId)
+        const githubToken = user?.githubToken || ''
+
+        const deployment = await Deployment.create({
+            projectId: project._id,
+            status: 'BUILDING'
+        })
+
+        const executionName = await triggerBuildTask(project, deployment, githubToken)
+
+        console.log(`[MANUAL REDEPLOY] Project ${slug} manual redeployment started. ID: ${deployment._id}`)
+
+        return res.json({
+            success: true,
+            deployment,
+            executionName
+        })
+    } catch (error) {
+        console.error('[MANUAL REDEPLOY] Failed to trigger manual redeployment:', error)
+        return res.status(500).json({ error: 'Failed to start redeployment' })
     }
 })
 

@@ -37,6 +37,7 @@ export default function ProjectDetailsPage() {
     const [loadingLogs, setLoadingLogs] = useState(false)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
+    const [redeploying, setRedeploying] = useState(false)
 
     const fetchProjectAndDeployments = async () => {
         try {
@@ -56,6 +57,26 @@ export default function ProjectDetailsPage() {
             setError(err.message || 'Failed to load project details')
         } finally {
             setLoading(false)
+        }
+    const handleRedeploy = async () => {
+        if (redeploying) return
+        setRedeploying(true)
+        try {
+            const res = await fetchWithAuth(`/projects/${slug}/redeploy`, {
+                method: 'POST'
+            })
+            if (res.ok) {
+                // Refresh deployments list
+                await fetchProjectAndDeployments()
+            } else {
+                const data = await res.json()
+                alert(data.error || 'Failed to trigger redeployment')
+            }
+        } catch (err: any) {
+            console.error('Redeploy failed:', err)
+            alert('Failed to trigger redeployment.')
+        } finally {
+            setRedeploying(false)
         }
     }
 
@@ -124,9 +145,28 @@ export default function ProjectDetailsPage() {
                                     Deployed at: <a href={`https://${project.slug}.launch-pad.dev`} target="_blank" rel="noreferrer" className="text-purple-400 hover:underline">{project.slug}.launch-pad.dev</a>
                                 </p>
                             </div>
-                            <div className="text-sm bg-white/5 border border-white/10 rounded-xl p-4 self-start">
-                                <span className="block text-zinc-500 font-medium">Repository URL</span>
-                                <a href={project.gitUrl} target="_blank" rel="noreferrer" className="text-zinc-300 hover:text-white truncate max-w-xs block font-mono mt-0.5">{project.gitUrl}</a>
+                            <div className="flex flex-wrap items-center gap-4 self-start">
+                                <div className="text-sm bg-white/5 border border-white/10 rounded-xl p-4">
+                                    <span className="block text-zinc-500 font-medium">Repository URL</span>
+                                    <a href={project.gitUrl} target="_blank" rel="noreferrer" className="text-zinc-300 hover:text-white truncate max-w-xs block font-mono mt-0.5">{project.gitUrl}</a>
+                                </div>
+                                <button
+                                    onClick={handleRedeploy}
+                                    disabled={redeploying}
+                                    className="bg-[#9560EB] hover:bg-[#8040E0] disabled:bg-purple-900/40 disabled:text-zinc-400 text-white font-bold h-[58px] px-6 rounded-xl border border-white/10 shadow-lg shadow-purple-500/10 flex items-center gap-2 transition-all duration-150 active:scale-95 text-sm shrink-0"
+                                >
+                                    {redeploying ? (
+                                        <>
+                                            <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
+                                            Redeploying...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="text-base">↻</span>
+                                            Redeploy
+                                        </>
+                                    )}
+                                </button>
                             </div>
                         </div>
                     </div>
