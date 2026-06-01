@@ -183,6 +183,8 @@ async function init() {
         publishLog(`Successfully uploaded ${files.length} assets to S3.`)
         console.log('Build output deployment finished.')
 
+        publishLog(`Deployment successful! Your site is live at: https://${PROJECT_ID}.launch-pad.dev 🎉`)
+
         await uploadLogs()
         await sendCallback('SUCCESS')
 
