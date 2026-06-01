@@ -470,6 +470,31 @@ router.get('/github/detect', async (req: Request, res: Response) => {
     }
 })
 
+router.get('/check-name', async (req: Request, res: Response) => {
+    const { name } = req.query
+    if (!name) {
+        return res.status(400).json({ error: 'name query parameter is required' })
+    }
+
+    const slug = (name as string).trim().toLowerCase()
+    
+    const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+    if (!slugRegex.test(slug)) {
+        return res.status(400).json({ error: 'Invalid project name format' })
+    }
+
+    try {
+        const existing = await Project.findOne({ slug })
+        if (existing) {
+            return res.json({ available: false })
+        }
+        return res.json({ available: true })
+    } catch (error) {
+        console.error('Failed to check project name:', error)
+        return res.status(500).json({ error: 'Internal server error' })
+    }
+})
+
 router.post('/', async (req: Request, res: Response) => {
     const { 
         gitURL, 

@@ -34,6 +34,8 @@ export default function LaunchPage() {
     const [projectSlug, setProjectSlug] = useState('')
     const [errorMsg, setErrorMsg] = useState('')
     const [validationError, setValidationError] = useState('')
+    const [nameChecking, setNameChecking] = useState(false)
+    const [nameAvailable, setNameAvailable] = useState<boolean | null>(null)
 
     // Load GitHub repositories on mount
     useEffect(() => {
@@ -145,6 +147,7 @@ export default function LaunchPage() {
     }
 
     const validateProjectNameLocal = (name: string) => {
+        setNameAvailable(null)
         if (!name) {
             setValidationError('')
             return
@@ -154,6 +157,27 @@ export default function LaunchPage() {
             setValidationError('Project name must be lowercase, alphanumeric, and can contain hyphens (but not start/end with them).')
         } else {
             setValidationError('')
+        }
+    }
+
+    const checkNameAvailability = async () => {
+        if (!project_name.trim() || validationError) return
+        setNameChecking(true)
+        setNameAvailable(null)
+        try {
+            const res = await fetchWithAuth(`/projects/check-name?name=${encodeURIComponent(project_name.trim())}`)
+            if (res.ok) {
+                const data = await res.json()
+                setNameAvailable(data.available)
+            } else {
+                const data = await res.json()
+                setErrorMsg(data.error || 'Failed to check name availability')
+            }
+        } catch (err) {
+            console.error('Error checking project name:', err)
+            setErrorMsg('Failed to check name availability.')
+        } finally {
+            setNameChecking(false)
         }
     }
 
@@ -449,7 +473,20 @@ export default function LaunchPage() {
 
                             {/* Project Name (Domain) */}
                             <div className="space-y-2">
-                                <label htmlFor="project_name" className="text-sm font-medium text-white/80 ml-1">Project Name (Optional)</label>
+                                <div className="flex justify-between items-center ml-1">
+                                    <label htmlFor="project_name" className="text-sm font-medium text-white/80">Project Name (Optional)</label>
+                                    {project_name.trim() !== '' && !validationError && (
+                                        <button
+                                            type="button"
+                                            onClick={checkNameAvailability}
+                                            disabled={nameChecking}
+                                            className="text-xs bg-[#9560EB]/20 border border-[#9560EB]/40 hover:bg-[#9560EB]/40 text-purple-200 px-3 py-1 rounded-lg font-medium transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                        >
+                                            {nameChecking && <span className="w-2.5 h-2.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>}
+                                            {nameChecking ? 'Checking...' : 'Check Availability'}
+                                        </button>
+                                    )}
+                                </div>
                                 <div className="relative">
                                     <input
                                         id="project_name"
@@ -467,6 +504,21 @@ export default function LaunchPage() {
                                 </div>
                                 {validationError && (
                                     <p className="text-red-400 text-sm ml-1">{validationError}</p>
+                                )}
+                                {nameAvailable !== null && !validationError && project_name.trim() !== '' && (
+                                    <p className={`text-xs ml-1 font-medium flex items-center gap-1.5 ${nameAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                        {nameAvailable ? (
+                                            <>
+                                                <span>✓</span>
+                                                Domain name is available!
+                                            </>
+                                        ) : (
+                                            <>
+                                                <span>✕</span>
+                                                Project name is already taken.
+                                            </>
+                                        )}
+                                    </p>
                                 )}
                             </div>
 
@@ -562,6 +614,7 @@ export default function LaunchPage() {
                                     status === 'loading' || 
                                     !selectedRepo || 
                                     !!validationError || 
+                                    (project_name.trim() !== '' && nameAvailable === false) ||
                                     (detectionResult && detectionResult.supported === 'NO')
                                 }
                                 className="bg-white text-black h-14 rounded-xl px-5 font-bold text-lg mt-2 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
