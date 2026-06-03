@@ -1,9 +1,27 @@
 import { ECSClient, DescribeTasksCommand } from '@aws-sdk/client-ecs'
 import { Deployment } from '../models/Deployment'
 
+const getAwsEndpoint = (): string | undefined => {
+    const ep = process.env.AWS_ENDPOINT
+    if (!ep) return undefined
+    const trimmed = ep.trim()
+    if (!trimmed || trimmed.startsWith('#') || trimmed.toLowerCase() === 'undefined' || trimmed.toLowerCase() === 'null') {
+        return undefined
+    }
+    try {
+        new URL(trimmed)
+        return trimmed
+    } catch (e) {
+        console.warn(`[AWS_ENDPOINT] Ignoring invalid AWS_ENDPOINT URL in reconciler: "${trimmed}"`)
+        return undefined
+    }
+}
+
+const awsEndpoint = getAwsEndpoint()
+
 const ecsClient = new ECSClient({
     region: process.env.AWS_REGION || 'us-east-1',
-    endpoint: process.env.AWS_ENDPOINT || undefined,
+    endpoint: awsEndpoint,
     credentials: {
         accessKeyId: (process.env.AWS_ACCESS_KEY_ID || 'mock') as string,
         secretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || 'mock') as string,

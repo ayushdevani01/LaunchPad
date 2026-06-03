@@ -11,9 +11,27 @@ import { exec } from 'child_process'
 
 const router = Router()
 
+const getAwsEndpoint = (): string | undefined => {
+    const ep = process.env.AWS_ENDPOINT
+    if (!ep) return undefined
+    const trimmed = ep.trim()
+    if (!trimmed || trimmed.startsWith('#') || trimmed.toLowerCase() === 'undefined' || trimmed.toLowerCase() === 'null') {
+        return undefined
+    }
+    try {
+        new URL(trimmed)
+        return trimmed
+    } catch (e) {
+        console.warn(`[AWS_ENDPOINT] Ignoring invalid AWS_ENDPOINT URL: "${trimmed}"`)
+        return undefined
+    }
+}
+
+const awsEndpoint = getAwsEndpoint()
+
 const ecsClient = new ECSClient({
     region: process.env.AWS_REGION || 'us-east-1',
-    endpoint: process.env.AWS_ENDPOINT || undefined,
+    endpoint: awsEndpoint,
     credentials: {
         accessKeyId: (process.env.AWS_ACCESS_KEY_ID || 'mock') as string,
         secretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || 'mock') as string,
@@ -22,8 +40,8 @@ const ecsClient = new ECSClient({
 
 const s3Client = new S3Client({
     region: process.env.AWS_REGION || 'us-east-1',
-    endpoint: process.env.AWS_ENDPOINT || undefined,
-    forcePathStyle: process.env.AWS_ENDPOINT ? true : undefined,
+    endpoint: awsEndpoint,
+    forcePathStyle: awsEndpoint ? true : undefined,
     credentials: {
         accessKeyId: (process.env.AWS_ACCESS_KEY_ID || 'mock') as string,
         secretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || 'mock') as string,
@@ -62,7 +80,7 @@ async function triggerBuildTask(project: any, deployment: any, githubToken: stri
             -e AWS_ACCESS_KEY_ID="${process.env.AWS_ACCESS_KEY_ID || 'mock'}" \
             -e AWS_SECRET_ACCESS_KEY="${process.env.AWS_SECRET_ACCESS_KEY || 'mock'}" \
             -e AWS_BUCKET_NAME="${process.env.AWS_BUCKET_NAME || 'launchpad-assets'}" \
-            -e AWS_ENDPOINT="${process.env.AWS_ENDPOINT || 'http://localstack:4566'}" \
+            -e AWS_ENDPOINT="${awsEndpoint || 'http://localstack:4566'}" \
             -e API_CALLBACK_URL="${internalCallback}" \
             ayushdevani01/launchpad-build-server:latest`
 
@@ -113,7 +131,7 @@ async function triggerBuildTask(project: any, deployment: any, githubToken: stri
                         { name: 'AWS_ACCESS_KEY_ID', value: process.env.AWS_ACCESS_KEY_ID as string },
                         { name: 'AWS_SECRET_ACCESS_KEY', value: process.env.AWS_SECRET_ACCESS_KEY as string },
                         { name: 'AWS_BUCKET_NAME', value: process.env.AWS_BUCKET_NAME as string },
-                        { name: 'AWS_ENDPOINT', value: process.env.AWS_ENDPOINT || '' },
+                        { name: 'AWS_ENDPOINT', value: awsEndpoint || '' },
                         { name: 'API_CALLBACK_URL', value: internalCallback }
                     ]
                 }
