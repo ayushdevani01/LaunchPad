@@ -9,10 +9,28 @@ import { ChildProcess } from 'child_process'
 
 const publisher = new Redis(process.env.REDIS_URL as string)
 
+const getAwsEndpoint = (): string | undefined => {
+    const ep = process.env.AWS_ENDPOINT
+    if (!ep) return undefined
+    const trimmed = ep.trim()
+    if (!trimmed || trimmed.startsWith('#') || trimmed.toLowerCase() === 'undefined' || trimmed.toLowerCase() === 'null') {
+        return undefined
+    }
+    try {
+        new URL(trimmed)
+        return trimmed
+    } catch (e) {
+        console.warn(`[AWS_ENDPOINT] Ignoring invalid AWS_ENDPOINT URL in build-server: "${trimmed}"`)
+        return undefined
+    }
+}
+
+const awsEndpoint = getAwsEndpoint()
+
 const s3Client = new S3Client({
     region: process.env.AWS_REGION || 'us-east-1',
-    endpoint: process.env.AWS_ENDPOINT || undefined,
-    forcePathStyle: process.env.AWS_ENDPOINT ? true : undefined,
+    endpoint: awsEndpoint,
+    forcePathStyle: awsEndpoint ? true : undefined,
     credentials: {
         accessKeyId: (process.env.AWS_ACCESS_KEY_ID || 'mock') as string,
         secretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || 'mock') as string,
