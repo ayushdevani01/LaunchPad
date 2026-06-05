@@ -58,6 +58,7 @@ export default function ProjectDetailsPage() {
         } finally {
             setLoading(false)
         }
+    }
     const handleRedeploy = async () => {
         if (redeploying) return
         setRedeploying(true)
