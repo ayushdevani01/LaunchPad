@@ -154,54 +154,62 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
     const headers = {
         Authorization: `token ${token}`,
         'User-Agent': 'LaunchPad-App',
-        Accept: 'application/vnd.github.v3.raw'
+        Accept: 'application/vnd.github.v3+json'
     }
 
+    const getFileContent = async (filePath: string): Promise<string> => {
+        const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`
+        const { data } = await axios.get(url, { headers })
+        
+        if (data.encoding === 'base64' && data.content) {
+            return Buffer.from(data.content, 'base64').toString('utf8')
+        }
+        
+        if (typeof data === 'string') return data
+        throw new Error('Unexpected response format from GitHub API')
+    }
+
+    const basePath = pathStr ? `${pathStr}/` : ''
+
     try {
-        const packageJsonUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pathStr ? pathStr + '/' : ''}package.json?ref=${branch}`
-        const { data: packageJsonStr } = await axios.get(packageJsonUrl, { headers })
-        const pkg = typeof packageJsonStr === 'object' ? packageJsonStr : JSON.parse(packageJsonStr)
+        const packageJsonStr = await getFileContent(`${basePath}package.json`)
+        let pkg: any
+        try {
+            pkg = JSON.parse(packageJsonStr)
+        } catch {
+            throw new Error('Failed to parse package.json')
+        }
 
         const deps = { ...pkg.dependencies, ...pkg.devDependencies }
 
         // 1. Next.js
         if (deps['next']) {
-            try {
-                const configNames = ['next.config.js', 'next.config.mjs', 'next.config.ts']
-                let hasStaticExport = false
-                for (const name of configNames) {
-                    try {
-                        const configUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pathStr ? pathStr + '/' : ''}${name}?ref=${branch}`
-                        const { data: configContent } = await axios.get(configUrl, { headers })
-                        const contentStr = typeof configContent === 'string' ? configContent : JSON.stringify(configContent)
-                        if (contentStr.includes("output: 'export'") || contentStr.includes('output: "export"')) {
-                            hasStaticExport = true
-                            break
-                        }
-                    } catch (e) {}
-                }
+            const configNames = ['next.config.js', 'next.config.mjs', 'next.config.ts']
+            let hasStaticExport = false
+            for (const name of configNames) {
+                try {
+                    const configContent = await getFileContent(`${basePath}${name}`)
+                    if (configContent.includes("output: 'export'") || configContent.includes('output: "export"')) {
+                        hasStaticExport = true
+                        break
+                    }
+                } catch (e) {}
+            }
 
-                if (hasStaticExport) {
-                    return {
-                        framework: 'Next.js (Static Export)',
-                        supported: 'YES',
-                        installCommand: 'npm install',
-                        buildCommand: 'npm run build',
-                        outputDir: 'out',
-                        notes: 'Next.js static export is fully supported.'
-                    }
-                } else {
-                    return {
-                        framework: 'Next.js (SSR)',
-                        supported: 'NO',
-                        notes: 'Next.js SSR/App Router requires a Node.js server. Only Next.js with output: "export" config is supported.'
-                    }
+            if (hasStaticExport) {
+                return {
+                    framework: 'Next.js (Static Export)',
+                    supported: 'YES',
+                    installCommand: 'npm install',
+                    buildCommand: 'npm run build',
+                    outputDir: 'out',
+                    notes: 'Next.js static export is fully supported.'
                 }
-            } catch (e) {
+            } else {
                 return {
                     framework: 'Next.js (SSR)',
                     supported: 'NO',
-                    notes: 'Next.js SSR/App router requires a Node.js server. Please enable static export in next.config.js.'
+                    notes: 'Next.js SSR/App Router requires a Node.js server. Only Next.js with output: "export" config is supported.'
                 }
             }
         }
@@ -272,6 +280,18 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
             }
         }
 
+        // 8. React (plain, without build tool)
+        if (deps['react']) {
+            return {
+                framework: 'React (Custom Setup)',
+                supported: 'PARTIAL',
+                installCommand: 'npm install',
+                buildCommand: 'npm run build',
+                outputDir: 'dist',
+                notes: 'React project detected with a custom build setup. Ensure it outputs static HTML/JS/CSS assets and set the correct output directory.'
+            }
+        }
+
         return {
             framework: 'Custom Node.js Project',
             supported: 'PARTIAL',
@@ -282,11 +302,11 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
         }
 
     } catch (err: any) {
-        // Check for static HTML fallback
-        if (err.response?.status === 404) {
+        // package.json not found — check for static HTML fallback
+        const isNotFound = err.response?.status === 404 || err.message?.includes('Failed to parse')
+        if (isNotFound) {
             try {
-                const indexUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${pathStr ? pathStr + '/' : ''}index.html?ref=${branch}`
-                await axios.get(indexUrl, { headers })
+                await getFileContent(`${basePath}index.html`)
                 return {
                     framework: 'Static HTML',
                     supported: 'YES',
@@ -306,6 +326,7 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
         throw err
     }
 }
+
 
 // =========================================================================
 // PUBLIC CALLBACK ROUTE (Called by Build Server container upon exit)
