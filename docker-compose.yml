@@ -66,7 +66,7 @@ services:
       - AWS_ECS_SUBNETS=${AWS_ECS_SUBNETS:-mock-subnet}
       - AWS_ECS_SECURITY_GROUPS=${AWS_ECS_SECURITY_GROUPS:-mock-sg}
       - AWS_ECS_CONTAINER_NAME=${AWS_ECS_CONTAINER_NAME:-build-server}
-      - AWS_ENDPOINT=${AWS_ENDPOINT:-http://localstack:4566}
+      - AWS_ENDPOINT=${AWS_ENDPOINT}
       - MOCK_ECS=${MOCK_ECS:-true}
       - DOCKER_NETWORK=launchpad-network
     volumes:
@@ -106,7 +106,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - BASE_PATH=${BASE_PATH:-http://localstack:4566/launchpad-assets}
+      - BASE_PATH=${BASE_PATH}
       - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/launchpad}
     networks:
       - launchpad-network
