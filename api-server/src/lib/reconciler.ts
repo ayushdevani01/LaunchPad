@@ -1,5 +1,6 @@
 import { ECSClient, DescribeTasksCommand } from '@aws-sdk/client-ecs'
 import { Deployment } from '../models/Deployment'
+import { Project } from '../models/Project'
 
 const getAwsEndpoint = (): string | undefined => {
     const ep = process.env.AWS_ENDPOINT
@@ -28,7 +29,7 @@ const ecsClient = new ECSClient({
     }
 })
 
-const RECONCILE_INTERVAL = 2 * 60 * 1000 // 2 minutes
+const RECONCILE_INTERVAL = 2 * 60 * 1000
 
 export function startReconciler() {
     const isMockMode = process.env.MOCK_ECS === 'true' || process.env.AWS_ECS_CLUSTER === 'local'
@@ -86,14 +87,34 @@ export function startReconciler() {
                     const arn = deployment.taskArn as string
                     if (!chunk.includes(arn)) continue
 
-                    const ecsStatus = taskStatusMap.get(arn)
+                    const task = tasks.find(t => t.taskArn === arn)
+                    const ecsStatus = task?.lastStatus
                     const isFailedInEcs = failedTaskArns.has(arn)
 
-                    // If task is stopped or completely missing from ECS, mark as FAILED
-                    if (ecsStatus === 'STOPPED' || isFailedInEcs) {
+                    if (ecsStatus === 'STOPPED') {
+                        const buildContainerName = process.env.AWS_ECS_CONTAINER_NAME || 'build-server'
+                        const buildContainer = task?.containers?.find(c => c.name === buildContainerName)
+                        const exitCode = buildContainer?.exitCode
+
+                        if (exitCode === 0) {
+                            deployment.status = 'SUCCESS'
+                            await deployment.save()
+
+                            const project = await Project.findById(deployment.projectId)
+                            if (project) {
+                                project.currentDeployment = deployment._id
+                                await project.save()
+                            }
+                            console.log(`[Reconciler] Deployment ${deployment._id} marked as SUCCESS (ECS task stopped with exit code 0)`)
+                        } else {
+                            deployment.status = 'FAILED'
+                            await deployment.save()
+                            console.log(`[Reconciler] Deployment ${deployment._id} marked as FAILED (ECS task stopped with exit code ${exitCode})`)
+                        }
+                    } else if (isFailedInEcs) {
                         deployment.status = 'FAILED'
                         await deployment.save()
-                        console.log(`[Reconciler] Deployment ${deployment._id} marked as FAILED (ECS task is STOPPED or missing)`)
+                        console.log(`[Reconciler] Deployment ${deployment._id} marked as FAILED (ECS task is missing or failed in ECS)`)
                     }
                 }
             }
