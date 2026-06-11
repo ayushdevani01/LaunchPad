@@ -1,21 +1,31 @@
 "use client"
 import React, { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { fetchWithAuth } from '../../lib/api'
 import ProtectedRoute from '../../components/ProtectedRoute'
 import Link from 'next/link'
 
+type RepoMode = 'mine' | 'any'
+
 export default function LaunchPage() {
+    // --- Mode toggle ---
+    const [repoMode, setRepoMode] = useState<RepoMode>('mine')
+
+    // --- My Repos state ---
     const [repos, setRepos] = useState<any[]>([])
     const [selectedRepo, setSelectedRepo] = useState<any | null>(null)
     const [branches, setBranches] = useState<string[]>([])
-    
     const [reposLoading, setReposLoading] = useState(true)
     const [branchesLoading, setBranchesLoading] = useState(false)
     const [isRepoOpen, setIsRepoOpen] = useState(false)
     const [isBranchOpen, setIsBranchOpen] = useState(false)
     const [repoSearch, setRepoSearch] = useState('')
 
+    // --- Any Repo state ---
+    const [manualGitUrl, setManualGitUrl] = useState('')
+    const [manualUrlError, setManualUrlError] = useState('')
+
+    // --- Shared build config ---
     const [project_name, setProjectName] = useState('')
     const [sourceDir, setSourceDir] = useState('')
     const [installCommand, setInstallCommand] = useState('')
@@ -24,11 +34,12 @@ export default function LaunchPage() {
     const [branch, setBranch] = useState('main')
     const [envVars, setEnvVars] = useState<{ key: string, value: string }[]>([])
     const [showAdvanced, setShowAdvanced] = useState(false)
-    
-    // Detection state
+
+    // --- Detection state ---
     const [detecting, setDetecting] = useState(false)
     const [detectionResult, setDetectionResult] = useState<any | null>(null)
 
+    // --- Submit state ---
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
     const [deployedUrl, setDeployedUrl] = useState('')
     const [projectSlug, setProjectSlug] = useState('')
@@ -37,7 +48,9 @@ export default function LaunchPage() {
     const [nameChecking, setNameChecking] = useState(false)
     const [nameAvailable, setNameAvailable] = useState<boolean | null>(null)
 
+    // -------------------------------------------------------------------------
     // Load GitHub repositories on mount
+    // -------------------------------------------------------------------------
     useEffect(() => {
         const loadRepos = async () => {
             setReposLoading(true)
@@ -59,7 +72,24 @@ export default function LaunchPage() {
         loadRepos()
     }, [])
 
-    // Load branches when repository is selected
+    // -------------------------------------------------------------------------
+    // Reset shared state when mode changes
+    // -------------------------------------------------------------------------
+    const handleModeChange = (mode: RepoMode) => {
+        setRepoMode(mode)
+        setSelectedRepo(null)
+        setManualGitUrl('')
+        setManualUrlError('')
+        setBranches([])
+        setBranch('main')
+        setDetectionResult(null)
+        setErrorMsg('')
+        setStatus('idle')
+    }
+
+    // -------------------------------------------------------------------------
+    // Load branches when a repo is selected (My Repos mode)
+    // -------------------------------------------------------------------------
     useEffect(() => {
         if (!selectedRepo) {
             setBranches([])
@@ -90,7 +120,9 @@ export default function LaunchPage() {
         loadBranches()
     }, [selectedRepo])
 
-    // Framework detection hook
+    // -------------------------------------------------------------------------
+    // Framework detection hook (My Repos mode only)
+    // -------------------------------------------------------------------------
     useEffect(() => {
         if (!selectedRepo || !branch) {
             setDetectionResult(null)
@@ -107,7 +139,6 @@ export default function LaunchPage() {
                     const detection = data.detection
                     setDetectionResult(detection)
 
-                    // Autofill commands if supported
                     if (detection.supported !== 'NO') {
                         setInstallCommand(detection.installCommand || '')
                         setBuildCommand(detection.buildCommand || '')
@@ -132,26 +163,35 @@ export default function LaunchPage() {
         return () => clearTimeout(delayDebounce)
     }, [selectedRepo, branch, sourceDir])
 
-    const handleAddEnvVar = () => {
-        setEnvVars([...envVars, { key: '', value: '' }])
+    // -------------------------------------------------------------------------
+    // Manual URL validation
+    // -------------------------------------------------------------------------
+    const validateManualUrl = (url: string) => {
+        setManualUrlError('')
+        if (!url) return
+        const githubRegex = /^https?:\/\/(www\.)?github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/i
+        if (!githubRegex.test(url.trim())) {
+            setManualUrlError('Please enter a valid GitHub repository URL (e.g. https://github.com/owner/repo)')
+        }
     }
 
-    const handleRemoveEnvVar = (index: number) => {
-        setEnvVars(envVars.filter((_, i) => i !== index))
-    }
-
+    // -------------------------------------------------------------------------
+    // Env vars helpers
+    // -------------------------------------------------------------------------
+    const handleAddEnvVar = () => setEnvVars([...envVars, { key: '', value: '' }])
+    const handleRemoveEnvVar = (index: number) => setEnvVars(envVars.filter((_, i) => i !== index))
     const handleEnvVarChange = (index: number, field: 'key' | 'value', val: string) => {
         const updated = [...envVars]
         updated[index][field] = val
         setEnvVars(updated)
     }
 
+    // -------------------------------------------------------------------------
+    // Project name validation
+    // -------------------------------------------------------------------------
     const validateProjectNameLocal = (name: string) => {
         setNameAvailable(null)
-        if (!name) {
-            setValidationError('')
-            return
-        }
+        if (!name) { setValidationError(''); return }
         const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
         if (!slugRegex.test(name)) {
             setValidationError('Project name must be lowercase, alphanumeric, and can contain hyphens (but not start/end with them).')
@@ -181,17 +221,39 @@ export default function LaunchPage() {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Derived: the final gitURL to submit
+    // -------------------------------------------------------------------------
+    const resolvedGitUrl = repoMode === 'mine'
+        ? selectedRepo?.gitUrl || ''
+        : manualGitUrl.trim()
+
+    const canSubmit = () => {
+        if (status === 'loading') return false
+        if (!!validationError) return false
+        if (project_name.trim() !== '' && nameAvailable === false) return false
+        if (repoMode === 'mine') {
+            if (!selectedRepo) return false
+            if (detectionResult && detectionResult.supported === 'NO') return false
+        } else {
+            if (!manualGitUrl.trim() || !!manualUrlError) return false
+        }
+        return true
+    }
+
+    // -------------------------------------------------------------------------
+    // Submit handler
+    // -------------------------------------------------------------------------
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
-        if (!selectedRepo) return
-        if (validationError || status === 'loading') return
+        if (!canSubmit()) return
         setStatus('loading')
         setErrorMsg('')
         setDeployedUrl('')
 
         try {
             const body: any = {
-                gitURL: selectedRepo.gitUrl,
+                gitURL: resolvedGitUrl,
                 project_name: project_name.trim() || undefined,
                 sourceDir: sourceDir.trim() || undefined,
                 installCommand: installCommand.trim() || undefined,
@@ -199,7 +261,7 @@ export default function LaunchPage() {
                 outputDir: outputDir.trim() || undefined,
                 branch: branch.trim() || 'main'
             }
-            
+
             if (envVars.length > 0) {
                 body.envVars = Object.fromEntries(
                     envVars.filter(e => e.key.trim()).map(e => [e.key.trim(), e.value.trim()])
@@ -234,6 +296,15 @@ export default function LaunchPage() {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // UI helpers
+    // -------------------------------------------------------------------------
+    const tabVariants = {
+        hidden: { opacity: 0, y: 8 },
+        visible: { opacity: 1, y: 0, transition: { duration: 0.25 } },
+        exit: { opacity: 0, y: -8, transition: { duration: 0.15 } }
+    }
+
     return (
         <ProtectedRoute>
             <div className="min-h-screen bg-black text-white bg-[linear-gradient(to_bottom,#000,#200D42_34%,#4F21A1_65%,#A46EDB_82%)] py-[72px] sm:py-24 relative overflow-clip flex items-center justify-center">
@@ -246,190 +317,306 @@ export default function LaunchPage() {
                         transition={{ duration: 0.5 }}
                         className="max-w-xl mx-auto bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-8 sm:p-12 shadow-2xl"
                     >
-                        <div className="flex justify-between items-center mb-6">
-                            <h1 className="text-4xl sm:text-5xl font-bold tracking-tighter text-center">Deploy your Project</h1>
+                        <div className="flex justify-between items-center mb-3">
+                            <h1 className="text-4xl sm:text-5xl font-bold tracking-tighter text-center w-full">Deploy your Project</h1>
                         </div>
-                        <p className="text-white/70 text-center mb-8 text-lg">Select a repository from your GitHub account to deploy.</p>
+                        <p className="text-white/70 text-center mb-8 text-lg">Select a repository to deploy.</p>
+
+                        {/* ── Mode Toggle Tabs ── */}
+                        <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 mb-8 gap-1">
+                            <button
+                                type="button"
+                                id="tab-my-repos"
+                                onClick={() => handleModeChange('mine')}
+                                className={`flex-1 h-10 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
+                                    repoMode === 'mine'
+                                        ? 'bg-[#9560EB] text-white shadow-lg shadow-[#9560EB]/30'
+                                        : 'text-white/50 hover:text-white/80'
+                                }`}
+                            >
+                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
+                                </svg>
+                                My Repositories
+                            </button>
+                            <button
+                                type="button"
+                                id="tab-any-repo"
+                                onClick={() => handleModeChange('any')}
+                                className={`flex-1 h-10 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
+                                    repoMode === 'any'
+                                        ? 'bg-[#9560EB] text-white shadow-lg shadow-[#9560EB]/30'
+                                        : 'text-white/50 hover:text-white/80'
+                                }`}
+                            >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                                </svg>
+                                Any Public Repo
+                            </button>
+                        </div>
 
                         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-                            <div className="space-y-2 relative">
-                                <label className="text-sm font-medium text-white/80 ml-1">Select GitHub Repository</label>
-                                
-                                <style>{`
-                                    .custom-dropdown-scrollbar::-webkit-scrollbar {
-                                        width: 6px;
-                                    }
-                                    .custom-dropdown-scrollbar::-webkit-scrollbar-track {
-                                        background: transparent;
-                                    }
-                                    .custom-dropdown-scrollbar::-webkit-scrollbar-thumb {
-                                        background: rgba(149, 96, 235, 0.5);
-                                        border-radius: 99px;
-                                    }
-                                    .custom-dropdown-scrollbar::-webkit-scrollbar-thumb:hover {
-                                        background: rgba(149, 96, 235, 0.8);
-                                    }
-                                `}</style>
 
-                                {/* Custom Trigger Button */}
-                                <button
-                                    type="button"
-                                    onClick={() => setIsRepoOpen(!isRepoOpen)}
-                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
-                                >
-                                    <span className={selectedRepo ? "text-white" : "text-white/40"}>
-                                        {selectedRepo ? selectedRepo.fullName : '-- Select Repository --'}
-                                    </span>
-                                    <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isRepoOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
-                                </button>
-
-                                {isRepoOpen && (
-                                    <div 
-                                        className="fixed inset-0 z-40 bg-black/0 cursor-default" 
-                                        onClick={() => setIsRepoOpen(false)}
-                                    />
-                                )}
-
-                                {isRepoOpen && (
-                                    <div 
-                                        onWheel={(e) => e.stopPropagation()}
-                                        style={{ backgroundColor: '#000000' }}
-                                        className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.3)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
+                            {/* ── Repo Source Section (animated tab switch) ── */}
+                            <AnimatePresence mode="wait">
+                                {repoMode === 'mine' ? (
+                                    <motion.div
+                                        key="mine"
+                                        variants={tabVariants}
+                                        initial="hidden"
+                                        animate="visible"
+                                        exit="exit"
+                                        className="flex flex-col gap-6"
                                     >
-                                        <div className="max-h-64 overflow-y-auto overscroll-y-contain p-2.5 flex flex-col gap-1 custom-dropdown-scrollbar">
-                                        <div className="relative mb-2 shrink-0">
-                                            <input
-                                                type="text"
-                                                value={repoSearch}
-                                                onChange={(e) => setRepoSearch(e.target.value)}
-                                                placeholder="Search repositories..."
-                                                className="w-full h-10 bg-white/5 border border-white/5 rounded-lg px-3.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#9560EB]/50 placeholder:text-white/30"
-                                                onClick={(e) => e.stopPropagation()}
-                                            />
-                                            {repoSearch && (
-                                                <button 
-                                                    type="button"
-                                                    onClick={() => setRepoSearch('')}
-                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40 hover:text-white"
-                                                >
-                                                    ✕
-                                                </button>
+                                        {/* Custom Scrollbar Style */}
+                                        <style>{`
+                                            .custom-dropdown-scrollbar::-webkit-scrollbar { width: 6px; }
+                                            .custom-dropdown-scrollbar::-webkit-scrollbar-track { background: transparent; }
+                                            .custom-dropdown-scrollbar::-webkit-scrollbar-thumb { background: rgba(149, 96, 235, 0.5); border-radius: 99px; }
+                                            .custom-dropdown-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(149, 96, 235, 0.8); }
+                                        `}</style>
+
+                                        {/* Repo Dropdown */}
+                                        <div className="space-y-2 relative">
+                                            <label className="text-sm font-medium text-white/80 ml-1">Select GitHub Repository</label>
+
+                                            <button
+                                                type="button"
+                                                id="repo-dropdown-trigger"
+                                                onClick={() => setIsRepoOpen(!isRepoOpen)}
+                                                className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
+                                            >
+                                                <span className={selectedRepo ? "text-white" : "text-white/40"}>
+                                                    {selectedRepo ? selectedRepo.fullName : '-- Select Repository --'}
+                                                </span>
+                                                <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isRepoOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+                                            </button>
+
+                                            {isRepoOpen && (
+                                                <div
+                                                    className="fixed inset-0 z-40 bg-black/0 cursor-default"
+                                                    onClick={() => setIsRepoOpen(false)}
+                                                />
                                             )}
-                                        </div>
 
-                                        {reposLoading ? (
-                                            <div className="flex flex-col gap-2 p-1">
-                                                {[1, 2, 3, 4].map((n) => (
-                                                    <div key={n} className="h-10 bg-white/5 rounded-lg animate-pulse flex items-center px-3 justify-between">
-                                                        <div className="h-3.5 bg-white/10 rounded w-2/3"></div>
-                                                        <div className="h-3 bg-white/10 rounded w-10"></div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : (() => {
-                                            const filtered = repos.filter(r => r.fullName.toLowerCase().includes(repoSearch.toLowerCase()))
-                                            if (filtered.length === 0) {
-                                                return <div className="text-center text-sm py-5 text-white/40">No matching repositories</div>
-                                            }
-                                            return filtered.map((repo) => (
-                                                <button
-                                                    key={repo.fullName}
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setSelectedRepo(repo)
-                                                        setIsRepoOpen(false)
-                                                        setRepoSearch('')
-                                                    }}
-                                                    className={`w-full h-10 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center justify-between duration-100 ${
-                                                        selectedRepo?.fullName === repo.fullName 
-                                                            ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner' 
-                                                            : 'text-white/80 hover:text-white'
-                                                    }`}
+                                            {isRepoOpen && (
+                                                <div
+                                                    onWheel={(e) => e.stopPropagation()}
+                                                    style={{ backgroundColor: '#000000' }}
+                                                    className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.3)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
                                                 >
-                                                    <span className="truncate">{repo.fullName}</span>
-                                                    {repo.private && (
-                                                        <span className="text-[9px] bg-white/15 text-white/60 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider scale-90">Private</span>
-                                                    )}
-                                                </button>
-                                            ))
-                                        })()}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Git Branch Selection */}
-                            {selectedRepo && (
-                                <div className="space-y-2 relative">
-                                    <label className="text-sm font-medium text-white/80 ml-1">Git Branch</label>
-                                    
-                                    {/* Custom Branch Trigger Button */}
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsBranchOpen(!isBranchOpen)}
-                                        className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
-                                    >
-                                        <span className="flex items-center gap-2">
-                                            {branchesLoading && <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>}
-                                            {branch}
-                                        </span>
-                                        <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isBranchOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
-                                    </button>
-
-                                    {/* Dropdown Backing Click-Away Overlay */}
-                                    {isBranchOpen && (
-                                        <div 
-                                            className="fixed inset-0 z-40 bg-black/0 cursor-default" 
-                                            onClick={() => setIsBranchOpen(false)}
-                                        />
-                                    )}
-
-                                    {/* Custom Floating Dropdown Menu for Branches */}
-                                    {isBranchOpen && (
-                                        <div 
-                                            onWheel={(e) => e.stopPropagation()}
-                                            style={{ backgroundColor: '#000000' }}
-                                            className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.25)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
-                                        >
-                                            <div className="max-h-52 overflow-y-auto overscroll-y-contain p-2 flex flex-col gap-1 custom-dropdown-scrollbar">
-                                            {branchesLoading ? (
-                                                <div className="flex flex-col gap-1.5 p-1">
-                                                    {[1, 2].map((n) => (
-                                                        <div key={n} className="h-9 bg-white/5 rounded-lg animate-pulse flex items-center px-3">
-                                                            <div className="h-3 bg-white/10 rounded w-1/3"></div>
+                                                    <div className="max-h-64 overflow-y-auto overscroll-y-contain p-2.5 flex flex-col gap-1 custom-dropdown-scrollbar">
+                                                        <div className="relative mb-2 shrink-0">
+                                                            <input
+                                                                type="text"
+                                                                value={repoSearch}
+                                                                onChange={(e) => setRepoSearch(e.target.value)}
+                                                                placeholder="Search repositories..."
+                                                                className="w-full h-10 bg-white/5 border border-white/5 rounded-lg px-3.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#9560EB]/50 placeholder:text-white/30"
+                                                                onClick={(e) => e.stopPropagation()}
+                                                            />
+                                                            {repoSearch && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setRepoSearch('')}
+                                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40 hover:text-white"
+                                                                >✕</button>
+                                                            )}
                                                         </div>
-                                                    ))}
-                                                </div>
-                                            ) : branches.length === 0 ? (
-                                                <div className="text-center text-sm py-4 text-white/40">No branches loaded</div>
-                                            ) : (
-                                                branches.map((b) => (
-                                                    <button
-                                                        key={b}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setBranch(b)
-                                                            setIsBranchOpen(false)
-                                                        }}
-                                                        className={`w-full h-9 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center duration-100 ${
-                                                            branch === b 
-                                                                ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner' 
-                                                                : 'text-white/80 hover:text-white'
-                                                        }`}
-                                                    >
-                                                        {b}
-                                                    </button>
-                                                ))
-                                            )}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
 
-                            {/* Source Directory */}
+                                                        {reposLoading ? (
+                                                            <div className="flex flex-col gap-2 p-1">
+                                                                {[1, 2, 3, 4].map((n) => (
+                                                                    <div key={n} className="h-10 bg-white/5 rounded-lg animate-pulse flex items-center px-3 justify-between">
+                                                                        <div className="h-3.5 bg-white/10 rounded w-2/3"></div>
+                                                                        <div className="h-3 bg-white/10 rounded w-10"></div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        ) : (() => {
+                                                            const filtered = repos.filter(r => r.fullName.toLowerCase().includes(repoSearch.toLowerCase()))
+                                                            if (filtered.length === 0) {
+                                                                return <div className="text-center text-sm py-5 text-white/40">No matching repositories</div>
+                                                            }
+                                                            return filtered.map((repo) => (
+                                                                <button
+                                                                    key={repo.fullName}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setSelectedRepo(repo)
+                                                                        setIsRepoOpen(false)
+                                                                        setRepoSearch('')
+                                                                    }}
+                                                                    className={`w-full h-10 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center justify-between duration-100 ${
+                                                                        selectedRepo?.fullName === repo.fullName
+                                                                            ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner'
+                                                                            : 'text-white/80 hover:text-white'
+                                                                    }`}
+                                                                >
+                                                                    <span className="truncate">{repo.fullName}</span>
+                                                                    {repo.private && (
+                                                                        <span className="text-[9px] bg-white/15 text-white/60 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider scale-90">Private</span>
+                                                                    )}
+                                                                </button>
+                                                            ))
+                                                        })()}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Branch selection */}
+                                        {selectedRepo && (
+                                            <div className="space-y-2 relative">
+                                                <label className="text-sm font-medium text-white/80 ml-1">Git Branch</label>
+
+                                                <button
+                                                    type="button"
+                                                    id="branch-dropdown-trigger"
+                                                    onClick={() => setIsBranchOpen(!isBranchOpen)}
+                                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
+                                                >
+                                                    <span className="flex items-center gap-2">
+                                                        {branchesLoading && <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>}
+                                                        {branch}
+                                                    </span>
+                                                    <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isBranchOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+                                                </button>
+
+                                                {isBranchOpen && (
+                                                    <div
+                                                        className="fixed inset-0 z-40 bg-black/0 cursor-default"
+                                                        onClick={() => setIsBranchOpen(false)}
+                                                    />
+                                                )}
+
+                                                {isBranchOpen && (
+                                                    <div
+                                                        onWheel={(e) => e.stopPropagation()}
+                                                        style={{ backgroundColor: '#000000' }}
+                                                        className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.25)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
+                                                    >
+                                                        <div className="max-h-52 overflow-y-auto overscroll-y-contain p-2 flex flex-col gap-1 custom-dropdown-scrollbar">
+                                                            {branchesLoading ? (
+                                                                <div className="flex flex-col gap-1.5 p-1">
+                                                                    {[1, 2].map((n) => (
+                                                                        <div key={n} className="h-9 bg-white/5 rounded-lg animate-pulse flex items-center px-3">
+                                                                            <div className="h-3 bg-white/10 rounded w-1/3"></div>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            ) : branches.length === 0 ? (
+                                                                <div className="text-center text-sm py-4 text-white/40">No branches loaded</div>
+                                                            ) : (
+                                                                branches.map((b) => (
+                                                                    <button
+                                                                        key={b}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setBranch(b)
+                                                                            setIsBranchOpen(false)
+                                                                        }}
+                                                                        className={`w-full h-9 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center duration-100 ${
+                                                                            branch === b
+                                                                                ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner'
+                                                                                : 'text-white/80 hover:text-white'
+                                                                        }`}
+                                                                    >{b}</button>
+                                                                ))
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Framework Detection Panel */}
+                                        {detecting && (
+                                            <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-center text-sm text-zinc-400 flex items-center justify-center gap-2">
+                                                <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
+                                                Analyzing repository framework...
+                                            </div>
+                                        )}
+
+                                        {detectionResult && !detecting && (
+                                            <div className={`p-5 rounded-xl border flex flex-col gap-2 ${
+                                                detectionResult.supported === 'YES' ? 'bg-green-500/10 border-green-500/25' :
+                                                detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/10 border-yellow-500/25' :
+                                                'bg-red-500/10 border-red-500/25'
+                                            }`}>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-sm font-medium text-white/60">Detected Framework</span>
+                                                    <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${
+                                                        detectionResult.supported === 'YES' ? 'bg-green-500/20 text-green-300' :
+                                                        detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/20 text-yellow-300' :
+                                                        'bg-red-500/20 text-red-300'
+                                                    }`}>
+                                                        {detectionResult.framework} ({detectionResult.supported === 'YES' ? 'Supported' : detectionResult.supported === 'PARTIAL' ? 'Warnings' : 'Unsupported'})
+                                                    </span>
+                                                </div>
+                                                <p className="text-xs text-zinc-400 leading-relaxed mt-1">{detectionResult.notes}</p>
+                                            </div>
+                                        )}
+                                    </motion.div>
+
+                                ) : (
+                                    <motion.div
+                                        key="any"
+                                        variants={tabVariants}
+                                        initial="hidden"
+                                        animate="visible"
+                                        exit="exit"
+                                        className="flex flex-col gap-4"
+                                    >
+                                        {/* Info notice */}
+                                        <div className="flex items-start gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                                            <svg className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <p className="text-xs text-blue-300 leading-relaxed">
+                                                Enter any <strong>public</strong> GitHub repository URL to deploy it. Private repos from other accounts are not accessible.
+                                            </p>
+                                        </div>
+
+                                        {/* Manual URL input */}
+                                        <div className="space-y-2">
+                                            <label htmlFor="manual-git-url" className="text-sm font-medium text-white/80 ml-1">GitHub Repository URL</label>
+                                            <input
+                                                id="manual-git-url"
+                                                type="url"
+                                                value={manualGitUrl}
+                                                onChange={(e) => {
+                                                    setManualGitUrl(e.target.value)
+                                                    validateManualUrl(e.target.value)
+                                                }}
+                                                placeholder="https://github.com/owner/repo"
+                                                className={`w-full h-14 bg-white/10 border ${manualUrlError ? 'border-red-500' : 'border-white/10'} rounded-xl px-5 font-medium placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white`}
+                                            />
+                                            {manualUrlError && (
+                                                <p className="text-red-400 text-xs ml-1">{manualUrlError}</p>
+                                            )}
+                                        </div>
+
+                                        {/* Branch input (manual, free text) */}
+                                        <div className="space-y-2">
+                                            <label htmlFor="manual-branch" className="text-sm font-medium text-white/80 ml-1">Branch</label>
+                                            <input
+                                                id="manual-branch"
+                                                type="text"
+                                                value={branch}
+                                                onChange={(e) => setBranch(e.target.value)}
+                                                placeholder="main"
+                                                className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white"
+                                            />
+                                        </div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+
+                            {/* ── Source Directory (shared) ── */}
                             <div className="space-y-2">
-                                <label htmlFor="sourceDir" className="text-sm font-medium text-white/80 ml-1">Source Directory (Optional)</label>
+                                <label htmlFor="sourceDir" className="text-sm font-medium text-white/80 ml-1">Source Directory <span className="text-white/40 font-normal">(Optional)</span></label>
                                 <input
                                     id="sourceDir"
                                     type="text"
@@ -441,40 +628,10 @@ export default function LaunchPage() {
                                 <p className="text-white/40 text-xs ml-1">For monorepos: path to your frontend folder</p>
                             </div>
 
-                            {/* Framework Detection Panel */}
-                            {detecting && (
-                                <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-center text-sm text-zinc-400 flex items-center justify-center gap-2">
-                                    <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-                                    Analyzing repository framework...
-                                </div>
-                            )}
-
-                            {detectionResult && !detecting && (
-                                <div className={`p-5 rounded-xl border flex flex-col gap-2 ${
-                                    detectionResult.supported === 'YES' ? 'bg-green-500/10 border-green-500/25' :
-                                    detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/10 border-yellow-500/25' :
-                                    'bg-red-500/10 border-red-500/25'
-                                }`}>
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-sm font-medium text-white/60">Detected Framework</span>
-                                        <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${
-                                            detectionResult.supported === 'YES' ? 'bg-green-500/20 text-green-300' :
-                                            detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/20 text-yellow-300' :
-                                            'bg-red-500/20 text-red-300'
-                                        }`}>
-                                            {detectionResult.framework} ({detectionResult.supported === 'YES' ? 'Supported' : detectionResult.supported === 'PARTIAL' ? 'Warnings' : 'Unsupported'})
-                                        </span>
-                                    </div>
-                                    <p className="text-xs text-zinc-400 leading-relaxed mt-1">
-                                        {detectionResult.notes}
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* Project Name (Domain) */}
+                            {/* ── Project Name (shared) ── */}
                             <div className="space-y-2">
                                 <div className="flex justify-between items-center ml-1">
-                                    <label htmlFor="project_name" className="text-sm font-medium text-white/80">Project Name (Optional)</label>
+                                    <label htmlFor="project_name" className="text-sm font-medium text-white/80">Project Name <span className="text-white/40 font-normal">(Optional)</span></label>
                                     {project_name.trim() !== '' && !validationError && (
                                         <button
                                             type="button"
@@ -502,27 +659,15 @@ export default function LaunchPage() {
                                     />
                                     <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 text-sm font-mono hidden sm:inline-block">.launch-pad.dev</span>
                                 </div>
-                                {validationError && (
-                                    <p className="text-red-400 text-sm ml-1">{validationError}</p>
-                                )}
+                                {validationError && <p className="text-red-400 text-sm ml-1">{validationError}</p>}
                                 {nameAvailable !== null && !validationError && project_name.trim() !== '' && (
                                     <p className={`text-xs ml-1 font-medium flex items-center gap-1.5 ${nameAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                        {nameAvailable ? (
-                                            <>
-                                                <span>✓</span>
-                                                Domain name is available!
-                                            </>
-                                        ) : (
-                                            <>
-                                                <span>✕</span>
-                                                Project name is already taken.
-                                            </>
-                                        )}
+                                        {nameAvailable ? <><span>✓</span>Domain name is available!</> : <><span>✕</span>Project name is already taken.</>}
                                     </p>
                                 )}
                             </div>
 
-                            {/* Advanced Settings Collapsible */}
+                            {/* ── Advanced Build Settings (shared) ── */}
                             <div className="border border-white/10 rounded-xl overflow-hidden bg-white/5">
                                 <button
                                     type="button"
@@ -575,9 +720,7 @@ export default function LaunchPage() {
                                                     type="button"
                                                     onClick={handleAddEnvVar}
                                                     className="text-xs text-purple-400 hover:text-purple-300 underline font-medium"
-                                                >
-                                                    + Add Variable
-                                                </button>
+                                                >+ Add Variable</button>
                                             </div>
                                             {envVars.map((item, idx) => (
                                                 <div key={idx} className="flex gap-2 items-center">
@@ -599,9 +742,7 @@ export default function LaunchPage() {
                                                         type="button"
                                                         onClick={() => handleRemoveEnvVar(idx)}
                                                         className="text-red-400 hover:text-red-300 text-xs px-2"
-                                                    >
-                                                        ✕
-                                                    </button>
+                                                    >✕</button>
                                                 </div>
                                             ))}
                                         </div>
@@ -609,14 +750,11 @@ export default function LaunchPage() {
                                 )}
                             </div>
 
+                            {/* ── Submit Button ── */}
                             <button
-                                disabled={
-                                    status === 'loading' || 
-                                    !selectedRepo || 
-                                    !!validationError || 
-                                    (project_name.trim() !== '' && nameAvailable === false) ||
-                                    (detectionResult && detectionResult.supported === 'NO')
-                                }
+                                type="submit"
+                                id="launch-project-btn"
+                                disabled={!canSubmit()}
                                 className="bg-white text-black h-14 rounded-xl px-5 font-bold text-lg mt-2 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                             >
                                 {status === 'loading' ? (
@@ -624,12 +762,11 @@ export default function LaunchPage() {
                                         <span className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></span>
                                         Launching...
                                     </>
-                                ) : (
-                                    'Launch Project'
-                                )}
+                                ) : 'Launch Project'}
                             </button>
                         </form>
 
+                        {/* ── Error Banner ── */}
                         {status === 'error' && (
                             <motion.div
                                 initial={{ opacity: 0, height: 0 }}
@@ -640,6 +777,7 @@ export default function LaunchPage() {
                             </motion.div>
                         )}
 
+                        {/* ── Success Panel ── */}
                         {status === 'success' && (
                             <motion.div
                                 initial={{ opacity: 0, scale: 0.95 }}
