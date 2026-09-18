@@ -1,4 +1,12 @@
 node_modules/
 .env
+.env.*
+!/.env.example
 service-account.json
 dist/
+.next/
+.open-next/
+*.tsbuildinfo
+build-server/bin/
+build-server/*.exe
+runtime.env

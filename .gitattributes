@@ -1,0 +1,5 @@
+# These files execute on the Linux VM even when edited on Windows.
+*.sh text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+Dockerfile text eol=lf
