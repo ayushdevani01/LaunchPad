@@ -1,0 +1,138 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "One immutable LaunchPad OpenNext deployment. Private artifacts, cache, revalidation and IAM-only runtime invocation.",
+  "Metadata": { "AWSToolsMetrics": { "AWSAgentToolkit": "aws-cloudformation@3" } },
+  "Parameters": {
+    "RuntimePermissionsBoundary": { "Type": "String", "Default": "" },
+    "ArtifactBucket": { "Type": "String", "AllowedPattern": "[a-z0-9][a-z0-9.-]+" },
+    "AssetPrefix": { "Type": "String", "AllowedPattern": "__outputs/[a-z0-9-]+/[a-zA-Z0-9-]+" },
+    "CachePrefix": { "Type": "String", "AllowedPattern": "__cache/[a-z0-9-]+/[a-zA-Z0-9-]+" },
+    "ServerKey": { "Type": "String", "AllowedPattern": "__artifacts/.+\\.zip" },
+    "ImageKey": { "Type": "String", "Default": "", "AllowedPattern": "(__artifacts/.+\\.zip)?" },
+    "RevalidationKey": { "Type": "String", "Default": "", "AllowedPattern": "(__artifacts/.+\\.zip)?" },
+    "Architecture": { "Type": "String", "Default": "x86_64", "AllowedValues": ["x86_64", "arm64"] },
+    "ReservedConcurrency": { "Type": "Number", "Default": 2, "MinValue": 0, "MaxValue": 10 },
+    "MemorySize": { "Type": "Number", "Default": 1024, "MinValue": 512, "MaxValue": 2048 }
+  },
+  "Conditions": {
+    "HasBoundary": { "Fn::Not": [{ "Fn::Equals": [{ "Ref": "RuntimePermissionsBoundary" }, ""] }] },
+    "HasImage": { "Fn::Not": [{ "Fn::Equals": [{ "Ref": "ImageKey" }, ""] }] },
+    "HasRevalidation": { "Fn::Not": [{ "Fn::Equals": [{ "Ref": "RevalidationKey" }, ""] }] },
+    "HasReservation": { "Fn::Not": [{ "Fn::Equals": [{ "Ref": "ReservedConcurrency" }, 0] }] }
+  },
+  "Resources": {
+    "TagCache": {
+      "Type": "AWS::DynamoDB::Table", "DeletionPolicy": "Delete", "UpdateReplacePolicy": "Delete",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Deployment-local reconstructible OpenNext cache tags", "must": ["No cross-project data", "Delete with retired deployment"] } },
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [{ "AttributeName": "tag", "AttributeType": "S" }, { "AttributeName": "path", "AttributeType": "S" }, { "AttributeName": "revalidatedAt", "AttributeType": "N" }],
+        "KeySchema": [{ "AttributeName": "tag", "KeyType": "HASH" }, { "AttributeName": "path", "KeyType": "RANGE" }],
+        "SSESpecification": { "SSEEnabled": true },
+        "GlobalSecondaryIndexes": [{ "IndexName": "revalidate", "KeySchema": [{ "AttributeName": "path", "KeyType": "HASH" }, { "AttributeName": "revalidatedAt", "KeyType": "RANGE" }], "Projection": { "ProjectionType": "ALL" } }]
+      }
+    },
+    "RevalidationQueue": {
+      "Type": "AWS::SQS::Queue", "Condition": "HasRevalidation",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "OpenNext serializes stale page regeneration per cache key", "must": ["FIFO", "Bounded retries"] } },
+      "Properties": {
+        "QueueName": { "Fn::Sub": "${AWS::StackName}-revalidation.fifo" }, "FifoQueue": true, "ContentBasedDeduplication": true,
+        "VisibilityTimeout": 180, "MessageRetentionPeriod": 3600, "SqsManagedSseEnabled": true,
+        "RedrivePolicy": { "deadLetterTargetArn": { "Fn::GetAtt": ["RevalidationDLQ", "Arn"] }, "maxReceiveCount": 3 }
+      }
+    },
+    "RevalidationDLQ": {
+      "Type": "AWS::SQS::Queue", "Condition": "HasRevalidation",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Bounds failed regeneration retries", "must": ["FIFO"] } },
+      "Properties": { "QueueName": { "Fn::Sub": "${AWS::StackName}-dlq.fifo" }, "FifoQueue": true, "MessageRetentionPeriod": 86400, "SqsManagedSseEnabled": true }
+    },
+    "RuntimeRole": {
+      "Type": "AWS::IAM::Role",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Next.js may access only this deployment cache and public assets", "must": ["No platform control-plane permissions", "Scope objects by deployment"] } },
+      "Properties": {
+        "PermissionsBoundary": { "Fn::If": ["HasBoundary", { "Ref": "RuntimePermissionsBoundary" }, { "Ref": "AWS::NoValue" }] },
+        "AssumeRolePolicyDocument": { "Version": "2012-10-17", "Statement": [{ "Effect": "Allow", "Principal": { "Service": "lambda.amazonaws.com" }, "Action": "sts:AssumeRole" }] },
+        "Policies": [{ "PolicyName": "DeploymentCache", "PolicyDocument": { "Version": "2012-10-17", "Statement": [
+          { "Effect": "Allow", "Action": ["logs:CreateLogStream", "logs:PutLogEvents"], "Resource": { "Fn::Sub": "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${AWS::StackName}-*:log-stream:*" } },
+          { "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": { "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucket}/${CachePrefix}/*" } },
+          { "Effect": "Allow", "Action": "s3:GetObject", "Resource": { "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucket}/${AssetPrefix}/*" } },
+          { "Effect": "Allow", "Action": ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:BatchWriteItem", "dynamodb:BatchGetItem"], "Resource": [{ "Fn::GetAtt": ["TagCache", "Arn"] }, { "Fn::Sub": "${TagCache.Arn}/index/*" }] },
+          { "Fn::If": ["HasRevalidation", { "Effect": "Allow", "Action": ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"], "Resource": { "Fn::GetAtt": ["RevalidationQueue", "Arn"] } }, { "Ref": "AWS::NoValue" }] }
+        ] } }]
+      }
+    },
+    "ServerLogs": {
+      "Type": "AWS::Logs::LogGroup", "DeletionPolicy": "Delete", "UpdateReplacePolicy": "Delete",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Keep runtime diagnostics bounded", "must": ["Seven day retention"] } },
+      "Properties": { "LogGroupName": { "Fn::Sub": "/aws/lambda/${AWS::StackName}-server" }, "RetentionInDays": 7 }
+    },
+    "Server": {
+      "Type": "AWS::Lambda::Function", "DependsOn": "ServerLogs",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "OpenNext buffered event handler for SSR, RSC, actions and API routes", "must": ["Immutable deployment name", "IAM-only invocation", "No public function policy"] } },
+      "Properties": {
+        "FunctionName": { "Fn::Sub": "${AWS::StackName}-server" }, "Runtime": "nodejs24.x", "Handler": "index.handler",
+        "Architectures": [{ "Ref": "Architecture" }], "Role": { "Fn::GetAtt": ["RuntimeRole", "Arn"] },
+        "Code": { "S3Bucket": { "Ref": "ArtifactBucket" }, "S3Key": { "Ref": "ServerKey" } },
+        "MemorySize": { "Ref": "MemorySize" }, "Timeout": 30,
+        "ReservedConcurrentExecutions": { "Fn::If": ["HasReservation", { "Ref": "ReservedConcurrency" }, { "Ref": "AWS::NoValue" }] },
+        "Environment": { "Variables": {
+          "CACHE_BUCKET_NAME": { "Ref": "ArtifactBucket" }, "CACHE_BUCKET_KEY_PREFIX": { "Ref": "CachePrefix" }, "CACHE_BUCKET_REGION": { "Ref": "AWS::Region" },
+          "CACHE_DYNAMO_TABLE": { "Ref": "TagCache" },
+          "REVALIDATION_QUEUE_URL": { "Fn::If": ["HasRevalidation", { "Ref": "RevalidationQueue" }, ""] }, "REVALIDATION_QUEUE_REGION": { "Ref": "AWS::Region" },
+          "NEXT_TELEMETRY_DISABLED": "1"
+        } }
+      }
+    },
+    "ServerURL": {
+      "Type": "AWS::Lambda::Url",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "IAM-only HTTP health and benchmark endpoint", "must": ["AWS_IAM"] } },
+      "Properties": { "TargetFunctionArn": { "Ref": "Server" }, "AuthType": "AWS_IAM", "InvokeMode": "BUFFERED" }
+    },
+    "ImageLogs": {
+      "Type": "AWS::Logs::LogGroup", "Condition": "HasImage", "DeletionPolicy": "Delete", "UpdateReplacePolicy": "Delete",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Bound image handler logs", "must": ["Seven day retention"] } },
+      "Properties": { "LogGroupName": { "Fn::Sub": "/aws/lambda/${AWS::StackName}-image" }, "RetentionInDays": 7 }
+    },
+    "Image": {
+      "Type": "AWS::Lambda::Function", "Condition": "HasImage", "DependsOn": "ImageLogs",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Next image optimization isolated from SSR", "must": ["Native dependencies must match architecture"] } },
+      "Properties": {
+        "FunctionName": { "Fn::Sub": "${AWS::StackName}-image" }, "Runtime": "nodejs24.x", "Handler": "index.handler",
+        "Architectures": [{ "Ref": "Architecture" }], "Role": { "Fn::GetAtt": ["RuntimeRole", "Arn"] },
+        "Code": { "S3Bucket": { "Ref": "ArtifactBucket" }, "S3Key": { "Ref": "ImageKey" } }, "MemorySize": 1024, "Timeout": 30,
+        "Environment": { "Variables": { "BUCKET_NAME": { "Ref": "ArtifactBucket" }, "BUCKET_KEY_PREFIX": { "Ref": "AssetPrefix" }, "BUCKET_REGION": { "Ref": "AWS::Region" } } }
+      }
+    },
+    "RevalidationLogs": {
+      "Type": "AWS::Logs::LogGroup", "Condition": "HasRevalidation", "DeletionPolicy": "Delete", "UpdateReplacePolicy": "Delete",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Diagnose failed regenerations", "must": ["Seven day retention"] } },
+      "Properties": { "LogGroupName": { "Fn::Sub": "/aws/lambda/${AWS::StackName}-revalidation" }, "RetentionInDays": 7 }
+    },
+    "Revalidation": {
+      "Type": "AWS::Lambda::Function", "Condition": "HasRevalidation", "DependsOn": "RevalidationLogs",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Regenerate stale pages by calling the signed server URL", "must": ["Bounded SQS retries"] } },
+      "Properties": {
+        "FunctionName": { "Fn::Sub": "${AWS::StackName}-revalidation" }, "Runtime": "nodejs24.x", "Handler": "index.handler",
+        "Architectures": [{ "Ref": "Architecture" }], "Role": { "Fn::GetAtt": ["RuntimeRole", "Arn"] },
+        "Code": { "S3Bucket": { "Ref": "ArtifactBucket" }, "S3Key": { "Ref": "RevalidationKey" } }, "MemorySize": 512, "Timeout": 30,
+        "Environment": { "Variables": { "SERVER_FUNCTION_NAME": { "Ref": "Server" } } }
+      }
+    },
+    "RevalidationInvoke": {
+      "Type": "AWS::IAM::Policy", "Condition": "HasRevalidation",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Revalidation can invoke only this deployment server", "must": ["Scoped to one function"] } },
+      "Properties": { "PolicyName": "RevalidateServer", "Roles": [{ "Ref": "RuntimeRole" }], "PolicyDocument": { "Version": "2012-10-17", "Statement": [{ "Effect": "Allow", "Action": ["lambda:InvokeFunction", "lambda:InvokeFunctionUrl"], "Resource": { "Fn::GetAtt": ["Server", "Arn"] } }] } }
+    },
+    "RevalidationEvents": {
+      "Type": "AWS::Lambda::EventSourceMapping", "Condition": "HasRevalidation",
+      "Metadata": { "com.aws.cloudformation.Context": { "why": "Consume queued ISR work", "must": ["Partial batch failure reporting"] } },
+      "Properties": { "EventSourceArn": { "Fn::GetAtt": ["RevalidationQueue", "Arn"] }, "FunctionName": { "Ref": "Revalidation" }, "BatchSize": 5, "FunctionResponseTypes": ["ReportBatchItemFailures"] }
+    }
+  },
+  "Outputs": {
+	"TagCacheTable": { "Description": "Private deployment tag cache", "Value": { "Ref": "TagCache" } },
+    "ServerFunction": { "Description": "IAM invocation target", "Value": { "Ref": "Server" } },
+    "ServerURL": { "Description": "IAM-only health and benchmark URL", "Value": { "Fn::GetAtt": ["ServerURL", "FunctionUrl"] } },
+    "ImageFunction": { "Description": "Optional image invocation target", "Value": { "Fn::If": ["HasImage", { "Ref": "Image" }, ""] } }
+  }
+}
