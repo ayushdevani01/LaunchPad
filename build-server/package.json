@@ -1,26 +1,17 @@
 {
   "name": "build-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "script.ts",
+  "private": true,
+  "description": "Go deployment worker; Node.js is used only to build application code",
   "scripts": {
-    "build": "tsc",
-    "dev": "ts-node script.ts",
-    "start": "node dist/script.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "go build -o dist/build-server ./cmd/build-server",
+    "dev": "go run ./cmd/build-server",
+    "start": "go run ./cmd/build-server",
+    "test": "go test ./...",
+    "test:integration": "node tests/log-pipeline.test.cjs"
   },
   "author": "",
   "license": "ISC",
-  "dependencies": {
-    "@aws-sdk/client-s3": "^3.500.0",
-    "dotenv": "^17.2.3",
-    "ioredis": "^5.3.2",
-    "mime-types": "^2.1.35"
-  },
-  "devDependencies": {
-    "@types/mime-types": "^3.0.1",
-    "@types/node": "^25.0.3",
-    "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
-  }
+  "dependencies": {},
+  "devDependencies": {}
 }
