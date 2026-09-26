@@ -1,17 +1,20 @@
-FROM node:20-slim
+FROM golang:1.26.10-bookworm AS compiler
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/build-server ./cmd/build-server
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /build-server ./cmd/build-server
 
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-
+# Node runs users' package managers and Next.js compilation. The worker itself
+# is Go. glibc matches the native Linux dependencies used by AWS Lambda.
+FROM node:24-bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN npm install --global @opennextjs/aws@4.1.12 && npm cache clean --force
+ENV OPEN_NEXT_BINARY=/usr/local/bin/open-next
 WORKDIR /home/app
-
-COPY script.ts script.ts
-COPY tsconfig.json tsconfig.json
-COPY package*.json ./
-
-RUN npm install
-
-RUN npm run build
-
-RUN chmod +x dist/script.js
-
-ENTRYPOINT [ "/bin/sh", "-c", "if [ -n \"$GITHUB_TOKEN\" ]; then GIT_URL=$(echo $GIT_REPOSITORY__URL | sed \"s|https://|https://x-access-token:$GITHUB_TOKEN@|\"); else GIT_URL=$GIT_REPOSITORY__URL; fi; git clone -b ${BRANCH:-main} \"$GIT_URL\" /home/app/output && exec node dist/script.js" ]
+RUN mkdir /home/app/work && chown -R node:node /home/app
+COPY --from=compiler /build-server /usr/local/bin/build-server
+USER node
+ENTRYPOINT ["/usr/local/bin/build-server"]
