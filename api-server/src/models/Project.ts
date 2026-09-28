@@ -12,6 +12,8 @@ export interface IProject extends Document {
     branch?: string
     envVars?: Map<string, string>
     currentDeployment?: mongoose.Types.ObjectId
+    latestDeployment?: mongoose.Types.ObjectId
+    deploymentTarget?: 'auto' | 'static' | 'nextjs-lambda'
     createdAt: Date
     updatedAt: Date
 }
@@ -27,6 +29,8 @@ const ProjectSchema = new Schema<IProject>({
     branch: { type: String, default: 'main' },
     envVars: { type: Map, of: String },
     currentDeployment: { type: Schema.Types.ObjectId, ref: 'Deployment' },
+    latestDeployment: { type: Schema.Types.ObjectId, ref: 'Deployment' },
+    deploymentTarget: { type: String, enum: ['auto', 'static', 'nextjs-lambda'], default: 'auto' },
 }, { timestamps: true })
 
 ProjectSchema.index({ userId: 1 })

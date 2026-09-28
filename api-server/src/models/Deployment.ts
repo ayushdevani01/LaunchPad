@@ -7,6 +7,8 @@ export interface IDeployment extends Document {
     logUrl?: string
     commitHash?: string
     taskArn?: string
+    runtime?: Record<string, any>
+    failureReason?: string
     createdAt: Date
     updatedAt: Date
 }
@@ -17,6 +19,8 @@ const DeploymentSchema = new Schema<IDeployment>({
     logUrl: { type: String },
     commitHash: { type: String },
     taskArn: { type: String },
+    runtime: { type: Schema.Types.Mixed },
+    failureReason: { type: String },
 }, { timestamps: true })
 
 DeploymentSchema.index({ projectId: 1 })
