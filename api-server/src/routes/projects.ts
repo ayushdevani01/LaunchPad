@@ -1,13 +1,15 @@
 import { Router, Request, Response } from 'express'
 import { generateSlug } from 'random-word-slugs'
-import { ECSClient, RunTaskCommand } from '@aws-sdk/client-ecs'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { Project } from '../models/Project'
 import { User } from '../models/User'
 import { Deployment } from '../models/Deployment'
 import { authMiddleware } from '../middleware/auth'
 import axios from 'axios'
-import { exec } from 'child_process'
+import { triggerBuildTask } from '../lib/build-task'
+import { githubAccessToken } from '../lib/github-token'
+import { publishResult } from '../lib/deployment-result'
+import mongoose from 'mongoose'
 
 const router = Router()
 
@@ -29,125 +31,12 @@ const getAwsEndpoint = (): string | undefined => {
 
 const awsEndpoint = getAwsEndpoint()
 
-const ecsClient = new ECSClient({
-    region: process.env.AWS_REGION || 'us-east-1',
-    endpoint: awsEndpoint,
-    credentials: {
-        accessKeyId: (process.env.AWS_ACCESS_KEY_ID || 'mock') as string,
-        secretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || 'mock') as string,
-    }
-})
-
 const s3Client = new S3Client({
-    region: process.env.AWS_REGION || 'us-east-1',
+    region: process.env.AWS_REGION || 'ap-south-1',
     endpoint: awsEndpoint,
     forcePathStyle: awsEndpoint ? true : undefined,
-    credentials: {
-        accessKeyId: (process.env.AWS_ACCESS_KEY_ID || 'mock') as string,
-        secretAccessKey: (process.env.AWS_SECRET_ACCESS_KEY || 'mock') as string,
-    }
+    ...(awsEndpoint ? { credentials: { accessKeyId: 'mock', secretAccessKey: 'mock' } } : {})
 })
-
-async function triggerBuildTask(project: any, deployment: any, githubToken: string) {
-    const gitURL = project.gitUrl
-    const projectSlug = project.slug
-    const normalizedSourceDir = project.sourceDir || ''
-    const installCommand = project.installCommand || ''
-    const buildCommand = project.buildCommand || ''
-    const outputDir = project.outputDir || ''
-    const branch = project.branch || 'main'
-    const envVars = project.envVars || {}
-
-    const internalCallback = process.env.INTERNAL_API_URL 
-        ? `${process.env.INTERNAL_API_URL}/projects/${projectSlug}/deployments/${deployment._id.toString()}/status`
-        : `http://api-server:9000/projects/${projectSlug}/deployments/${deployment._id.toString()}/status`
-
-    if (process.env.MOCK_ECS === 'true' || process.env.AWS_ECS_CLUSTER === 'local') {
-        const dockerCmd = `docker run -d \
-            --network ${process.env.DOCKER_NETWORK || 'launchpad-network'} \
-            -e GIT_REPOSITORY__URL="${gitURL}" \
-            -e GITHUB_TOKEN="${githubToken}" \
-            -e CLIENT_PROJECT_ID="${projectSlug}" \
-            -e DEPLOYMENT_ID="${deployment._id.toString()}" \
-            -e REDIS_URL="${process.env.REDIS_URL || 'redis://redis:6379'}" \
-            -e SOURCE_DIR="${normalizedSourceDir}" \
-            -e INSTALL_COMMAND="${installCommand}" \
-            -e BUILD_COMMAND="${buildCommand}" \
-            -e BUILD_OUTPUT_DIR="${outputDir}" \
-            -e BRANCH="${branch}" \
-            -e USER_ENV_VARS='${JSON.stringify(envVars)}' \
-            -e AWS_REGION="${process.env.AWS_REGION || 'us-east-1'}" \
-            -e AWS_ACCESS_KEY_ID="${process.env.AWS_ACCESS_KEY_ID || 'mock'}" \
-            -e AWS_SECRET_ACCESS_KEY="${process.env.AWS_SECRET_ACCESS_KEY || 'mock'}" \
-            -e AWS_BUCKET_NAME="${process.env.AWS_BUCKET_NAME || 'launchpad-assets'}" \
-            -e AWS_ENDPOINT="${awsEndpoint || 'http://localstack:4566'}" \
-            -e API_CALLBACK_URL="${internalCallback}" \
-            ayushdevani01/launchpad-build-server:latest`
-
-        console.log(`[MOCK ECS] Spawning local docker build container: ${dockerCmd}`)
-        exec(dockerCmd, (err, stdout, stderr) => {
-            if (err) {
-                console.error('[MOCK ECS] Failed to start docker container:', err)
-                console.error('[MOCK ECS] Stderr:', stderr)
-            } else {
-                console.log('[MOCK ECS] Container started with ID:', stdout.trim())
-            }
-        })
-
-        const executionName = `arn:aws:ecs:local:task/${deployment._id}`
-        deployment.taskArn = executionName
-        await deployment.save()
-        return executionName
-    }
-
-    const command = new RunTaskCommand({
-        cluster: process.env.AWS_ECS_CLUSTER,
-        taskDefinition: process.env.AWS_ECS_TASK_DEFINITION,
-        launchType: 'FARGATE',
-        networkConfiguration: {
-            awsvpcConfiguration: {
-                subnets: (process.env.AWS_ECS_SUBNETS || '').split(','),
-                securityGroups: (process.env.AWS_ECS_SECURITY_GROUPS || '').split(','),
-                assignPublicIp: 'ENABLED',
-            }
-        },
-        overrides: {
-            containerOverrides: [
-                {
-                    name: process.env.AWS_ECS_CONTAINER_NAME || 'build-server',
-                    environment: [
-                        { name: 'GIT_REPOSITORY__URL', value: gitURL },
-                        { name: 'GITHUB_TOKEN', value: githubToken },
-                        { name: 'CLIENT_PROJECT_ID', value: projectSlug },
-                        { name: 'DEPLOYMENT_ID', value: deployment._id.toString() },
-                        { name: 'REDIS_URL', value: process.env.REDIS_URL as string },
-                        { name: 'SOURCE_DIR', value: normalizedSourceDir },
-                        { name: 'INSTALL_COMMAND', value: installCommand },
-                        { name: 'BUILD_COMMAND', value: buildCommand },
-                        { name: 'BUILD_OUTPUT_DIR', value: outputDir },
-                        { name: 'BRANCH', value: branch },
-                        { name: 'USER_ENV_VARS', value: JSON.stringify(envVars) },
-                        { name: 'AWS_REGION', value: process.env.AWS_REGION as string },
-                        { name: 'AWS_ACCESS_KEY_ID', value: process.env.AWS_ACCESS_KEY_ID as string },
-                        { name: 'AWS_SECRET_ACCESS_KEY', value: process.env.AWS_SECRET_ACCESS_KEY as string },
-                        { name: 'AWS_BUCKET_NAME', value: process.env.AWS_BUCKET_NAME as string },
-                        { name: 'AWS_ENDPOINT', value: awsEndpoint || '' },
-                        { name: 'API_CALLBACK_URL', value: internalCallback }
-                    ]
-                }
-            ]
-        }
-    })
-
-    const response = await ecsClient.send(command)
-    const executionName = response.tasks?.[0]?.taskArn || 'unknown'
-
-    if (executionName !== 'unknown') {
-        deployment.taskArn = executionName
-        await deployment.save()
-    }
-    return executionName
-}
 
 // Framework Auto-Detector Helper
 async function detectFramework(owner: string, repo: string, pathStr: string, branch: string, token: string) {
@@ -207,9 +96,12 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
                 }
             } else {
                 return {
-                    framework: 'Next.js (SSR)',
-                    supported: 'NO',
-                    notes: 'Next.js SSR/App Router requires a Node.js server. Only Next.js with output: "export" config is supported.'
+                    framework: 'Next.js',
+                    supported: 'YES',
+                    installCommand: 'npm install',
+                    buildCommand: 'npm run build',
+                    outputDir: '',
+                    notes: 'Server rendering and API routes deploy to AWS Lambda. Static assets are served from S3.'
                 }
             }
         }
@@ -329,40 +221,20 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
 
 
 // =========================================================================
-// PUBLIC CALLBACK ROUTE (Called by Build Server container upon exit)
+// Callback notification: private S3 result is verified before status is changed.
 // =========================================================================
 router.post('/:slug/deployments/:deploymentId/status', async (req: Request, res: Response) => {
     const { slug, deploymentId } = req.params
-    const { status } = req.body
-
-    if (!['SUCCESS', 'FAILED'].includes(status)) {
-        return res.status(400).json({ error: 'Invalid status' })
-    }
-
+    if (typeof deploymentId !== 'string' || !mongoose.isValidObjectId(deploymentId)) return res.status(400).json({ error: 'Invalid deployment' })
     try {
         const project = await Project.findOne({ slug })
-        if (!project) {
-            return res.status(404).json({ error: 'Project not found' })
-        }
-
+        if (!project) return res.status(404).json({ error: 'Project not found' })
         const deployment = await Deployment.findOne({ _id: deploymentId, projectId: project._id })
-        if (!deployment) {
-            return res.status(404).json({ error: 'Deployment not found' })
-        }
-
-        deployment.status = status
-        await deployment.save()
-
-        if (status === 'SUCCESS') {
-            project.currentDeployment = deployment._id
-            await project.save()
-        }
-
-        console.log(`[CALLBACK] Project ${slug} deployment ${deploymentId} set to ${status}`)
-        return res.json({ success: true })
-    } catch (error) {
-        console.error('[CALLBACK] Failed to update status:', error)
-        return res.status(500).json({ error: 'Internal server error' })
+        if (!deployment) return res.status(404).json({ error: 'Deployment not found' })
+        const result = await publishResult(s3Client, project, deployment)
+        return res.json({ success: true, status: result.status })
+    } catch {
+        return res.status(409).json({ error: 'Verified deployment result is not available yet' })
     }
 })
 
@@ -404,7 +276,7 @@ router.post('/webhook/github', async (req: Request, res: Response) => {
 
             // Get the user's github token to clone private repos if necessary
             const user = await User.findById(project.userId)
-            const githubToken = user?.githubToken || ''
+            const githubToken = await githubAccessToken(user)
 
             // Create a new deployment
             const deployment = await Deployment.create({
@@ -432,13 +304,14 @@ router.get('/github/repos', async (req: Request, res: Response) => {
     const userId = res.locals.authUser.userId
     try {
         const user = await User.findById(userId)
-        if (!user || !user.githubToken) {
+        const githubToken = await githubAccessToken(user)
+        if (!githubToken) {
             return res.status(400).json({ error: 'GitHub account not linked. Please login via GitHub.' })
         }
 
         const { data } = await axios.get('https://api.github.com/user/repos?per_page=100&sort=updated', {
             headers: {
-                Authorization: `token ${user.githubToken}`,
+                Authorization: `token ${githubToken}`,
                 'User-Agent': 'LaunchPad-App'
             }
         })
@@ -468,13 +341,14 @@ router.get('/github/branches', async (req: Request, res: Response) => {
 
     try {
         const user = await User.findById(userId)
-        if (!user || !user.githubToken) {
+        const githubToken = await githubAccessToken(user)
+        if (!githubToken) {
             return res.status(400).json({ error: 'GitHub account not linked.' })
         }
 
         const { data } = await axios.get(`https://api.github.com/repos/${owner}/${repo}/branches`, {
             headers: {
-                Authorization: `token ${user.githubToken}`,
+                Authorization: `token ${githubToken}`,
                 'User-Agent': 'LaunchPad-App'
             }
         })
@@ -497,7 +371,8 @@ router.get('/github/detect', async (req: Request, res: Response) => {
 
     try {
         const user = await User.findById(userId)
-        if (!user || !user.githubToken) {
+        const githubToken = await githubAccessToken(user)
+        if (!githubToken) {
             return res.status(400).json({ error: 'GitHub account not linked.' })
         }
 
@@ -506,7 +381,7 @@ router.get('/github/detect', async (req: Request, res: Response) => {
             repo as string,
             path as string,
             branch as string,
-            user.githubToken
+            githubToken
         )
 
         return res.json({ detection: result })
@@ -565,6 +440,9 @@ router.post('/', async (req: Request, res: Response) => {
 
     const normalizedSourceDir = sourceDir?.trim().replace(/^\/+|\/+$/g, '') || ''
     const projectSlug = project_name?.trim() || generateSlug()
+    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(projectSlug)) return res.status(400).json({ error: 'Invalid project name' })
+    const deploymentTarget = req.body.deploymentTarget || 'auto'
+    if (!['auto', 'static', 'nextjs-lambda'].includes(deploymentTarget)) return res.status(400).json({ error: 'Invalid deployment target' })
 
     try {
         const existing = await Project.findOne({ slug: projectSlug })
@@ -573,7 +451,7 @@ router.post('/', async (req: Request, res: Response) => {
         }
 
         const user = await User.findById(userId)
-        const githubToken = user?.githubToken || ''
+        const githubToken = await githubAccessToken(user)
 
         const project = await Project.create({
             slug: projectSlug,
@@ -584,7 +462,8 @@ router.post('/', async (req: Request, res: Response) => {
             installCommand: installCommand?.trim() || undefined,
             outputDir: outputDir?.trim() || undefined,
             branch: branch?.trim() || 'main',
-            envVars
+            envVars,
+            deploymentTarget
         })
 
         const deployment = await Deployment.create({
@@ -726,7 +605,7 @@ router.get('/:slug/deployments/:deploymentId/logs', async (req: Request, res: Re
         return res.json({ logs: logContent })
     } catch (error: any) {
         if (error.name === 'NoSuchKey') {
-            return res.json({ logs: 'No logs found for this deployment.' })
+            return res.json({ logs: 'No logs found for this deployment.', pending: true })
         }
         console.error('Failed to fetch logs from S3:', error)
         return res.status(500).json({ error: 'Failed to fetch logs' })
@@ -744,7 +623,7 @@ router.post('/:slug/redeploy', async (req: Request, res: Response) => {
         }
 
         const user = await User.findById(userId)
-        const githubToken = user?.githubToken || ''
+        const githubToken = await githubAccessToken(user)
 
         const deployment = await Deployment.create({
             projectId: project._id,
