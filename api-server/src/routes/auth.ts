@@ -3,6 +3,8 @@ import bcrypt from 'bcrypt'
 import { User } from '../models/User'
 import { signToken } from '../lib/jwt'
 import axios from 'axios'
+import { randomBytes, timingSafeEqual } from 'crypto'
+import { tokenFields } from '../lib/github-token'
 
 const router = Router()
 
@@ -142,7 +144,11 @@ router.get('/github', (req, res) => {
     const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID
     const REDIRECT_URI = process.env.GITHUB_CALLBACK_URL || 'http://localhost:9000/auth/github/callback'
 
-    const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${REDIRECT_URI}&scope=user:email,repo`
+    if (!GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) return res.status(503).json({error: 'GitHub sign-in is not configured'})
+    const state = randomBytes(32).toString('hex')
+    const secure = REDIRECT_URI.startsWith('https://')
+    res.cookie(secure ? '__Host-launchpad_oauth' : 'launchpad_oauth', state, {httpOnly:true, secure, sameSite:'lax', path:'/', maxAge:600000})
+    const url = `https://github.com/login/oauth/authorize?${new URLSearchParams({client_id: GITHUB_CLIENT_ID, redirect_uri: REDIRECT_URI, scope:'user:email,repo', state})}`
     res.redirect(url)
 })
 
@@ -151,6 +157,14 @@ router.get('/github/callback', async (req, res) => {
     const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID
     const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET
     const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
+
+    const secure = (process.env.GITHUB_CALLBACK_URL || '').startsWith('https://')
+    const cookieName = secure ? '__Host-launchpad_oauth' : 'launchpad_oauth'
+    const cookies = Object.fromEntries((req.headers.cookie || '').split(';').map(v=>v.trim().split('=')))
+    const expected = cookies[cookieName]
+    const state = typeof req.query.state === 'string' ? req.query.state : ''
+    res.clearCookie(cookieName, {httpOnly:true, secure, sameSite:'lax', path:'/'})
+    if (!/^[a-f0-9]{64}$/.test(expected || '') || !/^[a-f0-9]{64}$/.test(state) || !timingSafeEqual(Buffer.from(expected),Buffer.from(state)) || typeof code !== 'string') return res.status(400).json({error:'Invalid GitHub sign-in state. Start sign-in again.'})
 
     try {
         const { data } = await axios.post('https://github.com/login/oauth/access_token', {
@@ -161,7 +175,8 @@ router.get('/github/callback', async (req, res) => {
             headers: { Accept: 'application/json' }
         })
 
-        const { access_token } = data
+        const fields = tokenFields(data)
+        const access_token = fields.githubToken
 
         const { data: userProfile } = await axios.get('https://api.github.com/user', {
             headers: { Authorization: `Bearer ${access_token}` },
@@ -171,7 +186,8 @@ router.get('/github/callback', async (req, res) => {
             headers: { Authorization: `Bearer ${access_token}` },
         })
 
-        const primaryEmail = emails.find((e: any) => e.primary)?.email || userProfile.email
+        const primaryEmail = emails.find((e: any) => e.primary && e.verified)?.email || emails.find((e: any) => e.verified)?.email
+        if (!primaryEmail) throw new Error('A verified GitHub email is required')
 
         // Check if user exists
         let user = await User.findOne({ email: primaryEmail })
@@ -180,11 +196,11 @@ router.get('/github/callback', async (req, res) => {
             user = await User.create({
                 email: primaryEmail,
                 username: userProfile.login,
-                password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8), // Random password
-                githubToken: access_token,
+                password: await bcrypt.hash(randomBytes(32).toString('hex'), 10),
+                ...fields,
             })
         } else {
-            user.githubToken = access_token
+            Object.assign(user, fields)
             await user.save()
         }
 
@@ -197,7 +213,7 @@ router.get('/github/callback', async (req, res) => {
         res.redirect(`${FRONTEND_URL}/auth/callback?token=${token}`)
 
     } catch (error: any) {
-        console.error('GitHub Auth Error:', error.response?.data || error.message)
+        console.error('GitHub authentication failed')
         res.redirect(`${FRONTEND_URL}/login?error=GitHub auth failed`)
     }
 })
