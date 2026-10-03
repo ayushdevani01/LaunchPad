@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node index.ts"
+    "dev": "ts-node index.ts",
+    "test": "npm run build && node --test tests/*.test.cjs"
   },
   "dependencies": {
     "@aws-sdk/client-ecs": "^3.500.0",
