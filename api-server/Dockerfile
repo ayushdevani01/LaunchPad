@@ -1,15 +1,9 @@
-FROM node:20-slim
-
-# Install docker CLI only when INSTALL_DOCKER build arg is set (for local dev simulation)
-ARG INSTALL_DOCKER=false
-RUN if [ "$INSTALL_DOCKER" = "true" ]; then \
-        apt-get update && apt-get install -y docker.io && rm -rf /var/lib/apt/lists/*; \
-    fi
+FROM node:24-bookworm-slim
 
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 COPY tsconfig.json ./
 COPY index.ts ./
