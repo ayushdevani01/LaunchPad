@@ -1,96 +1,37 @@
-import express, { Request, Response } from 'express'
-import httpProxy from 'http-proxy'
-import https from 'https'
-import http from 'http'
 import dotenv from 'dotenv'
 import mongoose, { Schema } from 'mongoose'
+import { Readable } from 'stream'
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
+import { createApp } from './app'
 
 dotenv.config()
-
-const app = express()
-const PORT = 8000
-
-const BASE_PATH = process.env.BASE_PATH // e.g. https://my-bucket.s3.amazonaws.com
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/launchpad'
-
-// Connect to MongoDB
-mongoose.connect(MONGODB_URI)
-    .then(() => console.log('Proxy connected to MongoDB'))
-    .catch(err => console.error('Proxy failed to connect to MongoDB:', err))
-
-// Minimal Mongoose model for Project resolution
-interface IProject {
-    slug: string
-    currentDeployment?: mongoose.Types.ObjectId
-}
-
-const ProjectSchema = new Schema<IProject>({
-    slug: { type: String, required: true, unique: true },
-    currentDeployment: { type: Schema.Types.ObjectId }
-})
-
-const Project = mongoose.model<IProject>('Project', ProjectSchema)
-
-const proxy = httpProxy.createProxy()
-
-proxy.on('proxyReq', (proxyReq, req) => {
-    if (req.url === '/') proxyReq.path += 'index.html'
-})
-
-// SPA fallback: intercept 404s for HTML requests and serve the deployment's index.html
-proxy.on('proxyRes', (proxyRes, req, res) => {
-    if (proxyRes.statusCode === 404) {
-        const accept = req.headers['accept'] || ''
-        if (accept.includes('text/html')) {
-            const subdomain = (req.headers.host || '').split('.')[0]
-            const deploymentId = (req as any).deploymentId
-            
-            if (!deploymentId) {
-                proxyRes.destroy()
-                res.writeHead(404)
-                res.end('Not Found')
-                return
-            }
-
-            const fallbackUrl = `${BASE_PATH}/__outputs/${subdomain}/${deploymentId}/index.html`
-            const client = fallbackUrl.startsWith('https') ? https : http
-            
-            client.get(fallbackUrl, (fallbackRes) => {
-                res.writeHead(200, {
-                    'Content-Type': 'text/html',
-                    ...fallbackRes.headers
-                })
-                fallbackRes.pipe(res)
-            }).on('error', () => {
-                res.writeHead(404)
-                res.end('Not Found')
-            })
-            proxyRes.destroy()
-            return
-        }
+const Project = mongoose.model('Project', new Schema({ slug: String, currentDeployment: Schema.Types.ObjectId }))
+const Deployment = mongoose.model('Deployment', new Schema({ projectId: Schema.Types.ObjectId, runtime: Schema.Types.Mixed }))
+const region = process.env.AWS_REGION || 'ap-south-1'
+const endpoint = process.env.AWS_ENDPOINT || undefined
+const s3 = new S3Client({ region, endpoint, forcePathStyle: !!endpoint, ...(endpoint ? { credentials: { accessKeyId: 'mock', secretAccessKey: 'mock' } } : {}) })
+const clients = new Map<string, LambdaClient>()
+const app = createApp({
+    async resolve(slug) {
+        const project = await Project.findOne({ slug }).lean()
+        if (!project?.currentDeployment) return null
+        const deployment = await Deployment.findOne({ _id: project.currentDeployment, projectId: project._id }).lean()
+        return { slug, deploymentId: project.currentDeployment.toString(), runtime: deployment?.runtime }
+    },
+    async asset(key) {
+        const output = await s3.send(new GetObjectCommand({ Bucket: process.env.AWS_BUCKET_NAME || 'launchpad-assets', Key: key }), { abortSignal: AbortSignal.timeout(30000) })
+        return { body: output.Body as Readable, contentType: output.ContentType, cacheControl: output.CacheControl, etag: output.ETag }
+    },
+    async invoke(name, targetRegion, event) {
+        let client = clients.get(targetRegion)
+        if (!client) { client = new LambdaClient({ region: targetRegion }); clients.set(targetRegion, client) }
+        const output = await client.send(new InvokeCommand({ FunctionName: name, Payload: Buffer.from(JSON.stringify(event)) }), { abortSignal: AbortSignal.timeout(35000) })
+        if (output.FunctionError || !output.Payload) throw new Error('LambdaInvocationFailed')
+        return output.Payload
     }
 })
 
-app.use(async (req: Request, res: Response) => {
-    const subdomain = req.hostname.split('.')[0]
-    
-    try {
-        const project = await Project.findOne({ slug: subdomain })
-        if (!project || !project.currentDeployment) {
-            return res.status(404).send('No active deployment found for this project.')
-        }
-
-        const deploymentId = (project.currentDeployment as any).toString()
-        const target = `${BASE_PATH}/__outputs/${subdomain}/${deploymentId}`;
-        
-        // Attach deploymentId to the request object so proxyRes can access it for SPA fallback
-        (req as any).deploymentId = deploymentId
-        
-        proxy.web(req, res, { target, changeOrigin: true })
-    } catch (err) {
-        console.error('Proxy routing error:', err)
-        return res.status(500).send('Internal server error')
-    }
-})
-
-app.listen(PORT, () => console.log(`Atomic S3 Reverse Proxy Running on port ${PORT}`))
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/launchpad')
+    .then(() => app.listen(Number(process.env.PORT || 8000), () => console.log('LaunchPad deployment proxy listening')))
+    .catch(() => { console.error('Proxy cannot connect to MongoDB'); process.exitCode = 1 })
