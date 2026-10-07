@@ -24,8 +24,19 @@ const ProjectSchema = new Schema<IProject>({
     userId: { type: Schema.Types.ObjectId, required: true }
 })
 const Project = mongoose.model<IProject>('Project', ProjectSchema)
+const Deployment = mongoose.model('Deployment', new Schema({
+    projectId: Schema.Types.ObjectId,
+    createdAt: Date
+}))
 
 const subscriber = new Redis(REDIS_URL)
+subscriber.on('error', (err: Error) => console.error('Redis subscriber error:', err.message))
+// A subscribed Redis connection cannot run history commands.
+const history = new Redis(REDIS_URL, {
+    connectTimeout: 5000, commandTimeout: 5000, maxRetriesPerRequest: 1,
+    enableOfflineQueue: false
+})
+history.on('error', () => {})
 
 const io = new Server(SOCKET_PORT, {
     cors: { origin: '*' }
@@ -51,8 +62,14 @@ io.on('connection', socket => {
     const userId = (socket as any).userId
     console.log(`Authenticated client connected: ${socket.id} (user: ${userId})`)
 
+    let subscriptionVersion = 0
     socket.on('subscribe', async (channel: string) => {
-        const projectSlug = channel.replace('logs:', '')
+        const version = ++subscriptionVersion
+        if (typeof channel !== 'string' || !/^logs:[a-zA-Z0-9_-]+(?::[a-fA-F0-9]{24})?$/.test(channel)) {
+            socket.emit('error', 'Invalid log channel')
+            return
+        }
+        const [, projectSlug, requestedDeployment] = channel.split(':')
         
         try {
             // Verify project ownership
@@ -68,8 +85,29 @@ io.on('connection', socket => {
                 return
             }
 
-            socket.join(channel)
-            socket.emit('message', JSON.stringify({ log: `Subscribed to ${channel}` }))
+            // Validate the deployment as well as the project before replaying history.
+            const deployment = requestedDeployment
+                ? await Deployment.findOne({ _id: requestedDeployment, projectId: project._id })
+                : await Deployment.findOne({ projectId: project._id }).sort({ createdAt: -1 })
+            if (requestedDeployment && !deployment) {
+                socket.emit('error', 'Deployment not found')
+                return
+            }
+            if (version !== subscriptionVersion || !socket.connected) return
+            for (const room of socket.rooms) if (room.startsWith('logs:')) await socket.leave(room)
+            await socket.join(channel)
+            // Join before reading history: concurrent live events can overlap the replay.
+            // Event IDs allow clients to merge and deduplicate that overlap.
+            if (deployment) {
+                try {
+                    const entries = await history.lrange(`logs:history:${projectSlug}:${deployment._id}`, 0, -1)
+                    if (version === subscriptionVersion && socket.connected) socket.emit('history', entries)
+                } catch {
+                    socket.emit('log_warning', 'Recent log history is unavailable; live output will continue.')
+                }
+            }
+            if (version !== subscriptionVersion || !socket.connected) return
+            socket.emit('subscribed', { channel })
             console.log(`User ${userId} successfully subscribed to logs for: ${projectSlug}`)
         } catch (err) {
             console.error('Subscription error:', err)
@@ -78,25 +116,29 @@ io.on('connection', socket => {
     })
 
     socket.on('disconnect', () => {
+        subscriptionVersion++
         console.log(`Client disconnected: ${socket.id}`)
     })
 })
 
 async function initRedisSubscribe() {
     console.log('Subscribing to Redis logs...')
-    subscriber.psubscribe('logs:*')
 
     subscriber.on('pmessage', (_pattern: string, channel: string, message: string) => {
-        console.log(`[${channel}] ${message}`)
         io.to(channel).emit('message', message)
     })
 
-    subscriber.on('error', (err: Error) => {
-        console.error('Redis subscriber error:', err)
-    })
+    await subscriber.psubscribe('logs:*')
 }
 
-initRedisSubscribe()
+// ioredis re-subscribes automatically; ask clients to fill the outage gap.
+subscriber.on('ready', () => {
+    void subscriber.psubscribe('logs:*')
+        .then(() => io.emit('logs:resync'))
+        .catch(() => console.error('Redis resubscription failed'))
+})
+history.on('ready', () => io.emit('logs:resync'))
+initRedisSubscribe().catch(() => console.error('Initial Redis subscription failed; reconnecting'))
 
 console.log(`Secure Logs Service running on port ${SOCKET_PORT}`)
-console.log(`Connected to Redis: ${REDIS_URL}`)
+console.log('Redis log subscriber configured')
