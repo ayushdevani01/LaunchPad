@@ -1,5 +1,5 @@
 "use client"
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import ProtectedRoute from '../../../components/ProtectedRoute'
@@ -39,7 +39,7 @@ export default function ProjectDetailsPage() {
     const [error, setError] = useState('')
     const [redeploying, setRedeploying] = useState(false)
 
-    const fetchProjectAndDeployments = async () => {
+    const fetchProjectAndDeployments = useCallback(async () => {
         try {
             const data = await getProject(slug)
             setProject(data.project)
@@ -58,7 +58,7 @@ export default function ProjectDetailsPage() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [slug])
     const handleRedeploy = async () => {
         if (redeploying) return
         setRedeploying(true)
@@ -83,34 +83,72 @@ export default function ProjectDetailsPage() {
 
     useEffect(() => {
         if (slug) fetchProjectAndDeployments()
-    }, [slug])
+    }, [slug, fetchProjectAndDeployments])
+
+    const selectedId = selectedDeployment?._id
+    const selectedStatus = selectedDeployment?.status
+
+    useEffect(() => {
+        if (!selectedId || !selectedStatus || !['BUILDING', 'PENDING'].includes(selectedStatus)) return
+        const controller = new AbortController()
+        let fetching = false
+        const timer = setInterval(async () => {
+            if (fetching) return
+            fetching = true
+            try {
+                const response = await fetchWithAuth(`/projects/${slug}/deployments`, { signal: controller.signal })
+                if (response.ok && !controller.signal.aborted) {
+                    const data = await response.json()
+                    if (controller.signal.aborted) return
+                    setDeployments(data.deployments || [])
+                    setSelectedDeployment(current => data.deployments?.find((deployment: Deployment) => deployment._id === current?._id) || current)
+                }
+            } catch { /* A temporary network failure should not interrupt live logs. */ }
+            finally { fetching = false }
+        }, 5000)
+        return () => { clearInterval(timer); controller.abort() }
+    }, [slug, selectedId, selectedStatus])
 
     useEffect(() => {
         if (!selectedDeployment) return
         if (selectedDeployment.status === 'BUILDING' || selectedDeployment.status === 'PENDING') {
             setHistoricalLogs('')
+            setLoadingLogs(false)
             return
         }
+
+        const controller = new AbortController()
 
         const fetchS3Logs = async () => {
             setLoadingLogs(true)
             setHistoricalLogs('Loading logs from storage...')
             try {
-                const res = await fetchWithAuth(`/projects/${slug}/deployments/${selectedDeployment._id}/logs`)
-                if (res.ok) {
-                    const data = await res.json()
-                    setHistoricalLogs(data.logs || 'No logs recorded.')
-                } else {
-                    setHistoricalLogs('Failed to retrieve logs from storage.')
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const res = await fetchWithAuth(`/projects/${slug}/deployments/${selectedDeployment._id}/logs`, { signal: controller.signal })
+                    if (res.ok) {
+                        const data = await res.json()
+                        if (controller.signal.aborted) return
+                        if (data.pending && attempt < 2) {
+                            setHistoricalLogs('Finalizing build log archive...')
+                            await new Promise(resolve => setTimeout(resolve, 1500))
+                            if (controller.signal.aborted) return
+                            continue
+                        }
+                        setHistoricalLogs(data.logs || 'No logs recorded.')
+                    } else {
+                        if (!controller.signal.aborted) setHistoricalLogs('Failed to retrieve logs from storage.')
+                    }
+                    return
                 }
             } catch (err) {
-                setHistoricalLogs('Error retrieving logs.')
+                if (!controller.signal.aborted) setHistoricalLogs('Error retrieving logs.')
             } finally {
-                setLoadingLogs(false)
+                if (!controller.signal.aborted) setLoadingLogs(false)
             }
         }
 
         fetchS3Logs()
+        return () => controller.abort()
     }, [selectedDeployment, slug])
 
     if (loading) {
@@ -238,7 +276,7 @@ export default function ProjectDetailsPage() {
                                     {/* Live logs vs S3 historical logs */}
                                     {selectedDeployment.status === 'BUILDING' || selectedDeployment.status === 'PENDING' ? (
                                         <div className="flex-1">
-                                            <LogViewer slug={slug} />
+                                            <LogViewer slug={slug} deploymentId={selectedDeployment._id} />
                                         </div>
                                     ) : (
                                         <div className="flex-1 bg-black/80 rounded-xl p-4 border border-white/5 font-mono text-xs overflow-auto max-h-[500px]">
