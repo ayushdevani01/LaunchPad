@@ -1,3 +1,15 @@
+import nextEnv from "@next/env";
+import { fileURLToPath } from "node:url";
+
+// Load the shared repository environment for local dashboard builds.
+// Hosting-provider environment variables retain precedence over file values.
+nextEnv.loadEnvConfig(
+  fileURLToPath(new URL("../", import.meta.url)),
+  process.env.NODE_ENV !== "production",
+  console,
+  true
+);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   webpack(config) {
