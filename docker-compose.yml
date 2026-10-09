@@ -1,149 +1,138 @@
-version: '3.8'
+name: launchpad
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-service: &service
+  restart: unless-stopped
+  logging: *logging
+  networks: [launchpad]
+
+x-aws-environment: &aws-environment
+  AWS_REGION: ${AWS_REGION:-ap-south-1}
+  AWS_BUCKET_NAME: ${AWS_BUCKET_NAME:?Set AWS_BUCKET_NAME in .env}
+  AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?Set AWS_ACCESS_KEY_ID in .env}
+  AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?Set AWS_SECRET_ACCESS_KEY in .env}
+  AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+  AWS_EC2_METADATA_DISABLED: "true"
 
 services:
-
   mongodb:
-    image: mongo:latest
-    container_name: launchpad-mongodb
-    ports:
-      - "27017:27017"
+    <<: *service
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?Set MONGO_ROOT_PASSWORD in .env}
+      MONGO_INITDB_DATABASE: launchpad
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?Set MONGO_APP_PASSWORD in .env}
+    command: [mongod, --wiredTigerCacheSizeGB, "0.35"]
     volumes:
       - mongo-data:/data/db
-    networks:
-      - launchpad-network
-    restart: on-failure
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/launchpad.js:ro
+    healthcheck:
+      test: [CMD-SHELL, 'mongosh --quiet --username admin --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "quit(db.adminCommand({ping:1}).ok ? 0 : 1)"']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 700m
 
   redis:
+    <<: *service
     image: redis:7-alpine
-    container_name: launchpad-redis
-    command: redis-server --bind 0.0.0.0 --requirepass ${REDIS_PASSWORD:-redis_pass}
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis-data:/data
-    networks:
-      - launchpad-network
-    restart: on-failure
-
-  localstack:
-    image: localstack/localstack:latest
-    container_name: launchpad-localstack
-    ports:
-      - "4566:4566"
     environment:
-      - SERVICES=s3
-    volumes:
-      - "/var/run/docker.sock:/var/run/docker.sock"
-      - "./localstack-init:/etc/localstack/init/ready.d"
-    networks:
-      - launchpad-network
-    restart: on-failure
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: [sh, -c, 'exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD" --maxmemory 192mb --maxmemory-policy noeviction']
+    volumes: [redis-data:/data]
+    ports:
+      - "${BUILD_REDIS_BIND_IP:?Set the private Redis bind IP in .env}:6379:6379"
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    mem_limit: 320m
 
   api-server:
-    build:
-      context: ./api-server
-      dockerfile: Dockerfile
-      args:
-        INSTALL_DOCKER: "true"
-    container_name: launchpad-api
-    ports:
-      - "9000:9000"
+    <<: *service
+    build: ./api-server
     environment:
-      - PORT=9000
-      - REDIS_URL=${REDIS_URL:-redis://:redis_pass@redis:6379}
-      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/launchpad}
-      - JWT_SECRET=${JWT_SECRET:-jwt_secret_phrase}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
-      - GITHUB_CALLBACK_URL=${GITHUB_CALLBACK_URL:-http://localhost:9000/auth/github/callback}
-      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-mock}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-mock}
-      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME:-launchpad-assets}
-      - AWS_ECS_CLUSTER=${AWS_ECS_CLUSTER:-local}
-      - AWS_ECS_TASK_DEFINITION=${AWS_ECS_TASK_DEFINITION:-mock-task}
-      - AWS_ECS_SUBNETS=${AWS_ECS_SUBNETS:-mock-subnet}
-      - AWS_ECS_SECURITY_GROUPS=${AWS_ECS_SECURITY_GROUPS:-mock-sg}
-      - AWS_ECS_CONTAINER_NAME=${AWS_ECS_CONTAINER_NAME:-build-server}
-      - AWS_ENDPOINT=${AWS_ENDPOINT}
-      - MOCK_ECS=${MOCK_ECS:-true}
-      - DOCKER_NETWORK=launchpad-network
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - launchpad-network
+      <<: *aws-environment
+      PORT: "9000"
+      MONGODB_URI: mongodb://launchpad:${MONGO_APP_PASSWORD}@mongodb:27017/launchpad?authSource=launchpad
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      AWS_ECS_CLUSTER: ${AWS_ECS_CLUSTER:?Set AWS_ECS_CLUSTER in .env}
+      AWS_ECS_TASK_DEFINITION: ${AWS_ECS_TASK_DEFINITION:?Set AWS_ECS_TASK_DEFINITION in .env}
+      AWS_ECS_SUBNETS: ${AWS_ECS_SUBNETS:?Set AWS_ECS_SUBNETS in .env}
+      AWS_ECS_SECURITY_GROUPS: ${AWS_ECS_SECURITY_GROUPS:?Set AWS_ECS_SECURITY_GROUPS in .env}
+      AWS_ECS_CONTAINER_NAME: build-server
+      BUILD_MAX_CONCURRENT: "2"
+      BUILD_REDIS_URL: ${BUILD_REDIS_URL:?Set the worker-reachable Redis URL in .env}
+      BUILD_CALLBACK_BASE_URL: https://api.${BASE_DOMAIN}
+      LAMBDA_PERMISSIONS_BOUNDARY_ARN: ${LAMBDA_PERMISSIONS_BOUNDARY_ARN:?Set the runtime boundary}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-}
     depends_on:
-      - mongodb
-      - redis
-      - localstack
-    restart: on-failure
+      mongodb: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:9000/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    mem_limit: 384m
 
   logs-service:
-    build:
-      context: ./logs-service
-      dockerfile: Dockerfile
-    container_name: launchpad-logs
-    ports:
-      - "9002:9002"
+    <<: *service
+    build: ./logs-service
     environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_pass}@redis:6379
-      - SOCKET_PORT=9002
-      - JWT_SECRET=${JWT_SECRET:-jwt_secret_phrase}
-      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/launchpad}
-    networks:
-      - launchpad-network
+      MONGODB_URI: mongodb://launchpad:${MONGO_APP_PASSWORD}@mongodb:27017/launchpad?authSource=launchpad
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      SOCKET_PORT: "9002"
     depends_on:
-      - redis
-      - mongodb
-    restart: on-failure
+      mongodb: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    mem_limit: 256m
 
   reverse-proxy:
-    build:
-      context: ./s3-reverse-proxy
-      dockerfile: Dockerfile
-    container_name: launchpad-proxy
-    ports:
-      - "8000:8000"
+    <<: *service
+    build: ./s3-reverse-proxy
     environment:
-      - BASE_PATH=${BASE_PATH}
-      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/launchpad}
-    networks:
-      - launchpad-network
+      <<: *aws-environment
+      MONGODB_URI: mongodb://launchpad:${MONGO_APP_PASSWORD}@mongodb:27017/launchpad?authSource=launchpad
     depends_on:
-      - mongodb
-      - localstack
-    restart: on-failure
+      mongodb: {condition: service_healthy}
+    mem_limit: 256m
 
-  caddy:
-    build:
-      context: ./caddy
-      dockerfile: Dockerfile
-    container_name: launchpad-gateway
-    ports:
-      - "80:80"
-      - "443:443"
+  gateway:
+    <<: *service
+    build: ./caddy
+    ports: ["80:80", "443:443"]
     environment:
-      - CF_API_TOKEN=${CF_API_TOKEN:-mock}
+      BASE_DOMAIN: ${BASE_DOMAIN:?Set BASE_DOMAIN in .env}
+      CF_API_TOKEN: ${CF_API_TOKEN:?Set CF_API_TOKEN in .env}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    networks:
-      - launchpad-network
     depends_on:
-      - api-server
-      - logs-service
-      - reverse-proxy
-    restart: on-failure
+      api-server: {condition: service_healthy}
+      logs-service: {condition: service_started}
+      reverse-proxy: {condition: service_started}
+    mem_limit: 128m
 
 networks:
-  launchpad-network:
-    driver: bridge
+  launchpad:
     name: launchpad-network
 
 volumes:
-  redis-data:
   mongo-data:
+  redis-data:
   caddy-data:
   caddy-config:

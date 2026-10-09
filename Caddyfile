@@ -1,21 +1,25 @@
 {
-    email mihirgoswami2006@gmail.com
+    admin off
 }
 
-# API Server
-api.launch-pad.dev {
-    reverse_proxy api-server:9000
-}
-
-# Logs-WebSocket Service
-logs.launch-pad.dev {
-    reverse_proxy logs-service:9002
-}
-
-# User's deployed projects
-*.launch-pad.dev {
+*.{$BASE_DOMAIN} {
     tls {
         dns cloudflare {env.CF_API_TOKEN}
+        resolvers 1.1.1.1 1.0.0.1
     }
-    reverse_proxy reverse-proxy:8000
+    encode gzip
+
+    @api host api.{$BASE_DOMAIN}
+    handle @api {
+        reverse_proxy api-server:9000
+    }
+
+    @logs host logs.{$BASE_DOMAIN}
+    handle @logs {
+        reverse_proxy logs-service:9002
+    }
+
+    handle {
+        reverse_proxy reverse-proxy:8000
+    }
 }
