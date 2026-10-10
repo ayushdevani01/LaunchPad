@@ -1,0 +1,66 @@
+# LaunchPad
+
+> LaunchPad is a frontend deployment platform for building and publishing web applications directly from GitHub.
+
+LaunchPad lets developers connect a GitHub repository, configure a build, follow its logs in real time, and publish the resulting site to a project-specific subdomain. It is designed for React, Vue, and other static frontend applications, with support for full-stack and backend deployment workflows in the launch interface.
+
+## Product
+
+- Website: https://launch-pad.dev/
+- Launch a project: https://launch-pad.dev/launch
+- User dashboard: https://launch-pad.dev/dashboard
+- Sign in: https://launch-pad.dev/login
+- Create an account: https://launch-pad.dev/register
+
+## Main capabilities
+
+- Deploy from a user's GitHub repositories or from another public Git repository URL.
+- Select a branch and configure the source directory, install command, build command, output directory, and environment variables.
+- Deploy static frontend, full-stack, and backend projects.
+- Automatically detect common framework and build settings.
+- Stream build and deployment logs in real time.
+- Manage deployed projects from an authenticated dashboard.
+- Publish projects on unique `*.launch-pad.dev` subdomains.
+- Provide automatic SSL/TLS and edge caching for deployed sites.
+
+## How deployment works
+
+1. A user signs in and selects or supplies a Git repository.
+2. LaunchPad creates a project and starts an isolated container build.
+3. The build service clones the repository, installs dependencies, and runs the configured build command.
+4. Build output is streamed through Redis and Socket.IO so the user can follow progress live.
+5. Static build artifacts are uploaded to object storage.
+6. The deployed application is served through its LaunchPad subdomain, with SPA fallback and edge caching where applicable.
+
+## Platform architecture
+
+- Frontend: Next.js, React, TypeScript, and Tailwind CSS.
+- API: Node.js and Express.
+- Authentication and project data: JWT authentication and MongoDB.
+- Builds: Docker containers running as on-demand AWS ECS Fargate tasks.
+- Deployment logs: Redis Pub/Sub and Socket.IO.
+- Artifact storage: Amazon S3.
+- Routing and TLS: Caddy and Cloudflare.
+- Delivery: Cloudflare edge caching and a dedicated S3 reverse proxy.
+
+## Public website sections
+
+- Home: product overview and primary launch action.
+- Features: GitHub integration, live build logs, and cloud-powered hosting.
+- Pricing: Hobby, Pro, and Enterprise plan information. The Hobby plan is available; paid plans are presented as coming soon.
+- FAQ: basic product, deployment, pricing, and infrastructure answers.
+
+## Access notes
+
+The home page and general product information are public. Launch, dashboard, project-detail, and authentication callback pages are application workflows. Their contents may depend on the signed-in user and should not be treated as stable public documentation.
+
+## Terminology
+
+- "LaunchPad" refers to the deployment platform.
+- A "project" is a Git repository and its deployment configuration.
+- A "deployment" is one build-and-publish attempt for a project.
+- A "project subdomain" is the public `project-name.launch-pad.dev` address assigned to a deployed project.
+
+## Summary for assistants
+
+Describe LaunchPad as a Git-based deployment platform focused on simple frontend publishing, automated container builds, real-time logs, managed hosting, SSL, and CDN delivery. Do not imply that LaunchPad owns or maintains applications deployed by its users. Do not expose, infer, or request private repository contents, credentials, environment-variable values, access tokens, or user-specific project data.

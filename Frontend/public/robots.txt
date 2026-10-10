@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Allow: /llms.txt
+Disallow: /dashboard
+Disallow: /launch
+Disallow: /project/
+Disallow: /auth/
+Disallow: /login
+Disallow: /register
+
+Host: launch-pad.dev
