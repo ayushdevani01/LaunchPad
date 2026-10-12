@@ -1,29 +1,35 @@
-"use client"
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { useAuth } from '../context/AuthContext'
+"use client";
 
-export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
-    const { user, loading } = useAuth()
-    const router = useRouter()
+import * as React from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import { rememberDestination } from "@/lib/session";
 
-    useEffect(() => {
-        if (!loading && !user) {
-            router.push('/login')
-        }
-    }, [user, loading, router])
+export default function ProtectedRoute({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { user, loading } = useAuth();
+  const router = useRouter();
 
-    if (loading) {
-        return (
-            <div className="flex h-screen items-center justify-center bg-black text-white">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent"></div>
-            </div>
-        )
+  React.useEffect(() => {
+    if (!loading && !user) {
+      rememberDestination();
+      router.replace("/login");
     }
+  }, [loading, user, router]);
 
-    if (!user) {
-        return null
-    }
+  if (loading || !user) {
+    return (
+      <div className="grid min-h-screen place-items-center bg-ink">
+        <div className="flex items-center gap-3 text-[13px] text-faint">
+          <span className="h-4 w-4 animate-spin rounded-full border border-white/25 border-t-transparent" />
+          Loading workspace
+        </div>
+      </div>
+    );
+  }
 
-    return <>{children}</>
+  return <>{children}</>;
 }
