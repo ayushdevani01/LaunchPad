@@ -1,34 +1,35 @@
-import { Banner } from "@/components/Banner";
-import { LandingNavbar } from "@/components/LandingNavbar";
-import { Hero } from "@/components/Hero";
-import { LogoTicker } from "@/components/LogoTicker";
-import { Features } from "@/components/Features";
-import { ProductShowcase } from "@/components/ProductShowcase";
-import { FAQs } from "@/components/FAQs";
-import { CallToAction } from "@/components/CallToAction";
-import { Footer } from "@/components/Footer";
-import { Pricing } from "@/components/Pricingdemo";
-import { Preloader } from "@/components/Preloader";
+import { MarketingNav } from "@/components/site/marketing-nav";
+import { ScrollProgress } from "@/components/site/scroll-progress";
+import { SiteFooter } from "@/components/site/site-footer";
+import { Hero } from "@/components/landing/hero";
+import { FrameworkStack } from "@/components/landing/framework-stack";
+import { Workflow } from "@/components/landing/workflow";
+import { Platform } from "@/components/landing/platform";
+import { Pricing } from "@/components/landing/pricing";
+import { Faq } from "@/components/landing/faq";
+import { Cta } from "@/components/landing/cta";
 
-
-export default function Home() {
+export default function LandingPage() {
   return (
-    <>
-      <Preloader />
-      <div className="overflow-x-hidden">
-        <Banner />
-      </div>
-      <LandingNavbar />
-      <div className="overflow-x-hidden">
+    <div className="relative min-h-screen bg-ink">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-accent focus:px-3 focus:py-2 focus:text-sm focus:text-ink"
+      >
+        Skip to content
+      </a>
+      <MarketingNav />
+      <ScrollProgress />
+      <main id="main">
         <Hero />
-        <LogoTicker />
-        <Features />
-        <ProductShowcase />
-        <FAQs />
+        <FrameworkStack />
+        <Workflow />
+        <Platform />
         <Pricing />
-        <CallToAction />
-      </div>
-      <Footer />
-    </>
+        <Faq />
+        <Cta />
+      </main>
+      <SiteFooter />
+    </div>
   );
 }
