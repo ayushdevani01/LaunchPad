@@ -1,0 +1,24 @@
+.feature {
+  scroll-margin-top: 7rem;
+}
+
+.feature button {
+  scroll-margin-top: 7rem;
+}
+
+.canvas {
+  height: 350px;
+}
+
+@media (min-width: 1024px) and (min-height: 650px) {
+  .stage {
+    position: sticky;
+    top: 6rem;
+  }
+}
+
+@media (min-width: 1280px) and (min-height: 800px) {
+  .canvas {
+    height: 400px;
+  }
+}
