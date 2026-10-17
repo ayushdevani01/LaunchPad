@@ -1,307 +1,482 @@
-"use client"
-import React, { useCallback, useEffect, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
-import Link from 'next/link'
-import ProtectedRoute from '../../../components/ProtectedRoute'
-import { getProject, fetchWithAuth } from '../../../lib/api'
-import LogViewer from '../../../components/LogViewer'
+"use client";
 
-interface Project {
-    _id: string
-    name: string
-    slug: string
-    gitUrl: string
-    createdAt: string
-    branch?: string
-    installCommand?: string
-    buildCommand?: string
-    outputDir?: string
-}
+import * as React from "react";
+import Link from "next/link";
+import { useParams } from "next/navigation";
+import {
+  ArrowLeft,
+  ArrowUpRight,
+  Copy,
+  GitBranch,
+  Globe2,
+  Lock,
+  RefreshCw,
+  RotateCw,
+} from "lucide-react";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { AppShell } from "@/components/app/app-shell";
+import { LogStream } from "@/components/app/log-stream";
+import { StatusBadge } from "@/components/ui/badge";
+import { Button, buttonStyles } from "@/components/ui/button";
+import {
+  fetchDeploymentLogs,
+  getProject,
+  listDeployments,
+  projectUrl,
+  redeploy as triggerRedeploy,
+  repoPath,
+  APP_DOMAIN,
+  type Deployment,
+  type Project,
+} from "@/lib/api";
+import { absoluteTime, relativeTime, shortId } from "@/lib/format";
+import { cn } from "@/lib/cn";
 
-interface Deployment {
-    _id: string
-    projectId: string
-    status: 'PENDING' | 'BUILDING' | 'SUCCESS' | 'FAILED'
-    createdAt: string
-}
+const ACTIVE = new Set(["BUILDING", "PENDING"]);
 
-export default function ProjectDetailsPage() {
-    const params = useParams()
-    const router = useRouter()
-    const slug = params.slug as string
+function ProjectBody() {
+  const params = useParams<{ slug: string }>();
+  const slug = params.slug;
 
-    const [project, setProject] = useState<Project | null>(null)
-    const [deployments, setDeployments] = useState<Deployment[]>([])
-    const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null)
-    const [historicalLogs, setHistoricalLogs] = useState('')
-    const [loadingLogs, setLoadingLogs] = useState(false)
-    const [loading, setLoading] = useState(true)
-    const [error, setError] = useState('')
-    const [redeploying, setRedeploying] = useState(false)
+  const [project, setProject] = React.useState<Project | null>(null);
+  const [deployments, setDeployments] = React.useState<Deployment[]>([]);
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState("");
 
-    const fetchProjectAndDeployments = useCallback(async () => {
+  const [logs, setLogs] = React.useState("");
+  const [logsLoading, setLogsLoading] = React.useState(false);
+  const [logsError, setLogsError] = React.useState("");
+  const [logsRetry, setLogsRetry] = React.useState(0);
+  const [redeploying, setRedeploying] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const redeployLock = React.useRef(false);
+  const loadSequence = React.useRef(0);
+
+  const load = React.useCallback(
+    async (signal?: AbortSignal, selectLatest = false) => {
+      const sequence = ++loadSequence.current;
+      try {
+        const [nextProject, nextDeployments] = await Promise.all([
+          getProject(slug, signal),
+          listDeployments(slug, signal),
+        ]);
+        if (signal?.aborted || sequence !== loadSequence.current) return;
+        setProject(nextProject);
+        setDeployments(nextDeployments);
+        setSelectedId((current) =>
+          !selectLatest && nextDeployments.some((item) => item._id === current)
+            ? current
+            : (nextDeployments[0]?._id ?? null),
+        );
+        setError("");
+      } catch (cause) {
+        if (signal?.aborted || sequence !== loadSequence.current) return;
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "Could not load this project",
+        );
+      } finally {
+        if (!signal?.aborted && sequence === loadSequence.current)
+          setLoading(false);
+      }
+    },
+    [slug],
+  );
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
+
+  const selected = deployments.find((item) => item._id === selectedId) ?? null;
+  const live = selected ? ACTIVE.has(selected.status) : false;
+  const active = deployments.some((item) => ACTIVE.has(item.status));
+  const deploymentId = selected?._id;
+
+  // Keep the deployment list fresh while a build is in flight.
+  React.useEffect(() => {
+    if (!active) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load(controller.signal);
+    }, 5000);
+    return () => {
+      window.clearInterval(timer);
+      controller.abort();
+    };
+  }, [active, load]);
+
+  // Finished deployments read their archived log, retrying while it uploads.
+  React.useEffect(() => {
+    setLogsError("");
+    if (!deploymentId || live) {
+      setLogs("");
+      setLogsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setLogsLoading(true);
+    setLogs("");
+
+    const run = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-            const data = await getProject(slug)
-            setProject(data.project)
+          const data = await fetchDeploymentLogs(
+            slug,
+            deploymentId,
+            controller.signal,
+          );
+          if (controller.signal.aborted) return;
+          if (data.pending && attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1500));
+            if (controller.signal.aborted) return;
+            continue;
+          }
+          if (data.pending)
+            throw new Error(
+              "The log archive is still being saved. Try loading it again shortly.",
+            );
+          if (!controller.signal.aborted)
+            setLogs(data.logs || "No output was recorded for this build.");
+          break;
+        } catch (cause) {
+          if (controller.signal.aborted) return;
+          if (attempt === 2) {
+            setLogsError(
+              cause instanceof Error
+                ? cause.message
+                : "Could not load the archived log.",
+            );
+          }
+        }
+      }
+      if (!controller.signal.aborted) setLogsLoading(false);
+    };
 
-            const depRes = await fetchWithAuth(`/projects/${slug}/deployments`)
-            if (depRes.ok) {
-                const depData = await depRes.json()
-                const deps = depData.deployments || []
-                setDeployments(deps)
-                if (deps.length > 0) {
-                    setSelectedDeployment(deps[0])
-                }
-            }
-        } catch (err: any) {
-            setError(err.message || 'Failed to load project details')
-        } finally {
-            setLoading(false)
-        }
-    }, [slug])
-    const handleRedeploy = async () => {
-        if (redeploying) return
-        setRedeploying(true)
-        try {
-            const res = await fetchWithAuth(`/projects/${slug}/redeploy`, {
-                method: 'POST'
-            })
-            if (res.ok) {
-                // Refresh deployments list
-                await fetchProjectAndDeployments()
-            } else {
-                const data = await res.json()
-                alert(data.error || 'Failed to trigger redeployment')
-            }
-        } catch (err: any) {
-            console.error('Redeploy failed:', err)
-            alert('Failed to trigger redeployment.')
-        } finally {
-            setRedeploying(false)
-        }
+    void run();
+    return () => {
+      controller.abort();
+    };
+  }, [deploymentId, live, slug, logsRetry]);
+
+  const onRedeploy = async () => {
+    if (redeployLock.current || active) return;
+    redeployLock.current = true;
+    setRedeploying(true);
+    try {
+      await triggerRedeploy(slug);
+      await load(undefined, true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not redeploy");
+    } finally {
+      setRedeploying(false);
+      redeployLock.current = false;
     }
+  };
 
-    useEffect(() => {
-        if (slug) fetchProjectAndDeployments()
-    }, [slug, fetchProjectAndDeployments])
-
-    const selectedId = selectedDeployment?._id
-    const selectedStatus = selectedDeployment?.status
-
-    useEffect(() => {
-        if (!selectedId || !selectedStatus || !['BUILDING', 'PENDING'].includes(selectedStatus)) return
-        const controller = new AbortController()
-        let fetching = false
-        const timer = setInterval(async () => {
-            if (fetching) return
-            fetching = true
-            try {
-                const response = await fetchWithAuth(`/projects/${slug}/deployments`, { signal: controller.signal })
-                if (response.ok && !controller.signal.aborted) {
-                    const data = await response.json()
-                    if (controller.signal.aborted) return
-                    setDeployments(data.deployments || [])
-                    setSelectedDeployment(current => data.deployments?.find((deployment: Deployment) => deployment._id === current?._id) || current)
-                }
-            } catch { /* A temporary network failure should not interrupt live logs. */ }
-            finally { fetching = false }
-        }, 5000)
-        return () => { clearInterval(timer); controller.abort() }
-    }, [slug, selectedId, selectedStatus])
-
-    useEffect(() => {
-        if (!selectedDeployment) return
-        if (selectedDeployment.status === 'BUILDING' || selectedDeployment.status === 'PENDING') {
-            setHistoricalLogs('')
-            setLoadingLogs(false)
-            return
-        }
-
-        const controller = new AbortController()
-
-        const fetchS3Logs = async () => {
-            setLoadingLogs(true)
-            setHistoricalLogs('Loading logs from storage...')
-            try {
-                for (let attempt = 0; attempt < 3; attempt++) {
-                    const res = await fetchWithAuth(`/projects/${slug}/deployments/${selectedDeployment._id}/logs`, { signal: controller.signal })
-                    if (res.ok) {
-                        const data = await res.json()
-                        if (controller.signal.aborted) return
-                        if (data.pending && attempt < 2) {
-                            setHistoricalLogs('Finalizing build log archive...')
-                            await new Promise(resolve => setTimeout(resolve, 1500))
-                            if (controller.signal.aborted) return
-                            continue
-                        }
-                        setHistoricalLogs(data.logs || 'No logs recorded.')
-                    } else {
-                        if (!controller.signal.aborted) setHistoricalLogs('Failed to retrieve logs from storage.')
-                    }
-                    return
-                }
-            } catch (err) {
-                if (!controller.signal.aborted) setHistoricalLogs('Error retrieving logs.')
-            } finally {
-                if (!controller.signal.aborted) setLoadingLogs(false)
-            }
-        }
-
-        fetchS3Logs()
-        return () => controller.abort()
-    }, [selectedDeployment, slug])
-
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-black text-white flex justify-center items-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent"></div>
-            </div>
-        )
+  const copyLogs = async () => {
+    try {
+      await navigator.clipboard.writeText(logs);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setLogsError(
+        "Copy was unavailable. Select the log text and copy it manually.",
+      );
     }
+  };
 
-    if (error || !project) {
-        return (
-            <div className="min-h-screen bg-black text-white flex justify-center items-center">
-                <div className="text-red-400">Error: {error || 'Project not found'}</div>
-            </div>
-        )
-    }
-
+  if (loading) {
     return (
-        <ProtectedRoute>
-            <div className="min-h-screen bg-black text-white px-4 py-24 sm:px-6 lg:px-8 bg-[linear-gradient(to_bottom,#000,#200D42_34%,#4F21A1_65%,#A46EDB_82%)] relative overflow-clip">
-                <div className="absolute h-[375px] w-[750px] sm:w-[1536px] sm:h-[768px] lg:w-[2400px] llg:h-[800px] rounded-[100%] bg-black left-1/2 -translate-x-1/2 border border-[#B48CDE] bg-[radial-gradient(closest-side,#000_82%,#9560EB)] top-[calc(100%-96px)] sm:top-[calc(100%-120px)] opacity-30"></div>
+      <div className="space-y-4">
+        <div className="h-8 w-56 animate-pulse rounded bg-white/[0.04]" />
+        <div className="h-4 w-80 animate-pulse rounded bg-white/[0.03]" />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[280px_1fr]">
+          <div className="h-72 animate-pulse rounded-xl border border-white/[0.06] bg-panel/40" />
+          <div className="h-72 animate-pulse rounded-xl border border-white/[0.06] bg-panel/40" />
+        </div>
+      </div>
+    );
+  }
 
-                <div className="mx-auto max-w-6xl relative z-10">
-                    <div className="mb-8">
-                        <Link href="/dashboard" className="text-zinc-400 hover:text-white mb-4 inline-block font-medium">
-                            ← Back to Dashboard
-                        </Link>
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                            <div>
-                                <h1 className="text-4xl font-bold tracking-tight text-white">{project.name || project.slug}</h1>
-                                <p className="text-zinc-400 mt-2 text-base">
-                                    Deployed at: <a href={`https://${project.slug}.launch-pad.dev`} target="_blank" rel="noreferrer" className="text-purple-400 hover:underline">{project.slug}.launch-pad.dev</a>
-                                </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-4 self-start">
-                                <div className="text-sm bg-white/5 border border-white/10 rounded-xl p-4">
-                                    <span className="block text-zinc-500 font-medium">Repository URL</span>
-                                    <a href={project.gitUrl} target="_blank" rel="noreferrer" className="text-zinc-300 hover:text-white truncate max-w-xs block font-mono mt-0.5">{project.gitUrl}</a>
-                                </div>
-                                <button
-                                    onClick={handleRedeploy}
-                                    disabled={redeploying}
-                                    className="bg-[#9560EB] hover:bg-[#8040E0] disabled:bg-purple-900/40 disabled:text-zinc-400 text-white font-bold h-[58px] px-6 rounded-xl border border-white/10 shadow-lg shadow-purple-500/10 flex items-center gap-2 transition-all duration-150 active:scale-95 text-sm shrink-0"
-                                >
-                                    {redeploying ? (
-                                        <>
-                                            <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-                                            Redeploying...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <span className="text-base">↻</span>
-                                            Redeploy
-                                        </>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+  if (!project) {
+    return (
+      <div className="rounded-xl border border-danger/25 bg-danger/[0.05] p-6">
+        <p className="text-sm text-danger">
+          {error || "This project could not be found."}
+        </p>
+        <div className="mt-4 flex gap-2">
+          <Button variant="secondary" size="sm" onClick={() => void load()}>
+            <RefreshCw className="h-3.5 w-3.5" />
+            Retry
+          </Button>
+          <Link href="/dashboard" className={buttonStyles("ghost", "sm")}>
+            Back to projects
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        {/* Deployment List Sidebar */}
-                        <div className="bg-black/40 border border-white/10 rounded-2xl p-6 backdrop-blur-xl h-fit">
-                            <h2 className="text-xl font-bold mb-4 text-white">Deployments</h2>
-                            {deployments.length === 0 ? (
-                                <p className="text-zinc-500 text-sm">No builds found.</p>
-                            ) : (
-                                <div className="space-y-3">
-                                    {deployments.map((dep) => {
-                                        const isSelected = selectedDeployment?._id === dep._id
-                                        return (
-                                            <div
-                                                key={dep._id}
-                                                onClick={() => setSelectedDeployment(dep)}
-                                                className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                                                    isSelected 
-                                                        ? 'bg-purple-600/20 border-purple-500 shadow-lg shadow-purple-500/10' 
-                                                        : 'bg-white/5 border-white/10 hover:bg-white/10'
-                                                }`}
-                                            >
-                                                <div className="flex justify-between items-center mb-1">
-                                                    <span className="text-xs text-zinc-400 font-mono">
-                                                        #{dep._id.slice(-6)}
-                                                    </span>
-                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                                        dep.status === 'SUCCESS' ? 'bg-green-500/20 text-green-300' :
-                                                        dep.status === 'FAILED' ? 'bg-red-500/20 text-red-300' :
-                                                        'bg-yellow-500/20 text-yellow-300 animate-pulse'
-                                                    }`}>
-                                                        {dep.status}
-                                                    </span>
-                                                </div>
-                                                <span className="text-xs text-zinc-500">
-                                                    {new Date(dep.createdAt).toLocaleString()}
-                                                </span>
-                                            </div>
-                                        )
-                                    })}
-                                </div>
-                            )}
-                        </div>
+  return (
+    <div>
+      <Link
+        href="/dashboard"
+        className="inline-flex items-center gap-1.5 text-[12px] text-faint transition-colors hover:text-fg"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Projects
+      </Link>
 
-                        {/* Logs View Panel */}
-                        <div className="lg:col-span-2 bg-black/40 border border-white/10 rounded-2xl p-6 backdrop-blur-xl flex flex-col min-h-[500px]">
-                            {selectedDeployment ? (
-                                <div className="flex-1 flex flex-col">
-                                    <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/10">
-                                        <div>
-                                            <h3 className="text-lg font-bold text-white">
-                                                Build Logs #{selectedDeployment._id.slice(-6)}
-                                            </h3>
-                                            <span className="text-xs text-zinc-400 font-mono">
-                                                Status: {selectedDeployment.status}
-                                            </span>
-                                        </div>
-                                        {(selectedDeployment.status === 'BUILDING' || selectedDeployment.status === 'PENDING') && (
-                                            <span className="flex h-2.5 w-2.5 relative">
-                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
-                                                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500"></span>
-                                            </span>
-                                        )}
-                                    </div>
+      <div className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-[26px] font-medium leading-tight tracking-[-0.03em]">
+              {project.name || project.slug}
+            </h1>
+            {selected ? <StatusBadge status={selected.status} /> : null}
+          </div>
 
-                                    {/* Live logs vs S3 historical logs */}
-                                    {selectedDeployment.status === 'BUILDING' || selectedDeployment.status === 'PENDING' ? (
-                                        <div className="flex-1">
-                                            <LogViewer slug={slug} deploymentId={selectedDeployment._id} />
-                                        </div>
-                                    ) : (
-                                        <div className="flex-1 bg-black/80 rounded-xl p-4 border border-white/5 font-mono text-xs overflow-auto max-h-[500px]">
-                                            {loadingLogs ? (
-                                                <div className="flex justify-center items-center h-full py-20 text-zinc-500 gap-2">
-                                                    <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-                                                    Retrieving logs...
-                                                </div>
-                                            ) : (
-                                                <pre className="whitespace-pre-wrap text-zinc-300 select-text leading-relaxed">
-                                                    {historicalLogs}
-                                                </pre>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="flex-1 flex justify-center items-center text-zinc-500">
-                                    Select a deployment to view build details.
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-faint">
+            {project.currentDeployment ? (
+              <a
+                href={projectUrl(project.slug)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 font-mono text-[11.5px] text-dim hover:text-fg"
+              >
+                <Lock className="h-3 w-3 text-white/30" />
+                {project.slug}.{APP_DOMAIN}
+                <ArrowUpRight className="h-3 w-3" />
+              </a>
+            ) : (
+              <span className="font-mono text-[11.5px] text-faint">
+                No production deployment yet
+              </span>
+            )}
+            <a
+              href={project.gitUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 font-mono text-[11.5px] hover:text-dim"
+            >
+              <Globe2 className="h-3 w-3" />
+              {repoPath(project.gitUrl)}
+            </a>
+            {project.branch ? (
+              <span className="inline-flex items-center gap-1.5 font-mono text-[11.5px]">
+                <GitBranch className="h-3 w-3" />
+                {project.branch}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2">
+          {project.currentDeployment ? (
+            <a
+              href={projectUrl(project.slug)}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonStyles("secondary", "md")}
+            >
+              Visit site
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </a>
+          ) : null}
+          <Button
+            size="md"
+            onClick={() => void onRedeploy()}
+            loading={redeploying}
+            disabled={active}
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+            {active ? "Build in progress" : "Redeploy"}
+          </Button>
+        </div>
+      </div>
+
+      {error ? (
+        <p
+          role="alert"
+          className="mt-5 rounded-lg border border-danger/25 bg-danger/[0.05] p-3 text-[13px] text-danger"
+        >
+          {error}
+        </p>
+      ) : null}
+      {selected?.failureReason ? (
+        <p
+          role="alert"
+          className="mt-5 rounded-lg border border-danger/25 p-3 text-[13px] text-danger"
+        >
+          {selected.failureReason}
+        </p>
+      ) : null}
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {[
+          { label: "Folder", value: project.sourceDir || "/" },
+          { label: "Build", value: project.buildCommand || "default" },
+          { label: "Output", value: project.outputDir || "default" },
+          { label: "Created", value: absoluteTime(project.createdAt) },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className="rounded-lg border border-white/[0.07] bg-panel/50 px-3 py-2.5"
+          >
+            <p className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-faint">
+              {item.label}
+            </p>
+            <p className="mt-1 truncate font-mono text-[11.5px] text-dim">
+              {item.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-[270px_minmax(0,1fr)]">
+        <div className="rounded-xl border border-white/[0.08] bg-panel/60">
+          <div className="flex items-center justify-between border-b border-white/[0.07] px-3.5 py-2.5">
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">
+              Deployments
+            </span>
+            <span className="font-mono text-[10px] text-faint">
+              {deployments.length}
+            </span>
+          </div>
+
+          {deployments.length === 0 ? (
+            <p className="px-3.5 py-8 text-center text-[12px] text-faint">
+              No builds yet. Redeploy to create the first one.
+            </p>
+          ) : (
+            <div className="max-h-[420px] space-y-0.5 overflow-y-auto p-1.5">
+              {deployments.map((deployment) => {
+                const isSelected = deployment._id === selectedId;
+                return (
+                  <button
+                    key={deployment._id}
+                    type="button"
+                    onClick={() => setSelectedId(deployment._id)}
+                    aria-pressed={isSelected}
+                    className={cn(
+                      "relative flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left transition-colors",
+                      isSelected ? "bg-white/[0.06]" : "hover:bg-white/[0.03]",
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-accent transition-opacity",
+                        isSelected ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate font-mono text-[11.5px] text-dim">
+                        #{shortId(deployment._id)}
+                      </span>
+                      <span className="mt-0.5 block font-mono text-[10px] text-faint">
+                        {relativeTime(deployment.createdAt)}
+                      </span>
+                    </span>
+                    <StatusBadge
+                      status={deployment.status}
+                      className="shrink-0 scale-90 px-2 py-0.5"
+                    />
+                  </button>
+                );
+              })}
             </div>
-        </ProtectedRoute>
-    )
+          )}
+        </div>
+
+        <div className="flex min-h-[420px] flex-col overflow-hidden rounded-xl border border-white/[0.08] bg-panel/60">
+          {selected ? (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.07] px-3.5 py-2.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="font-mono text-[11px] text-fg">
+                    build #{shortId(selected._id)}
+                  </span>
+                  <span className="font-mono text-[10px] text-faint">
+                    {absoluteTime(selected.createdAt)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!live ? (
+                    <button
+                      type="button"
+                      onClick={() => void copyLogs()}
+                      disabled={logsLoading || !logs}
+                      className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2 py-1 font-mono text-[10px] text-faint hover:text-fg"
+                    >
+                      <Copy className="h-2.5 w-2.5" />
+                      {copied ? "copied" : "copy"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              {logsError ? (
+                <p
+                  role="alert"
+                  className="border-b border-warn/20 p-3 text-[12px] text-warn"
+                >
+                  {logsError}{" "}
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => setLogsRetry((value) => value + 1)}
+                  >
+                    Reload logs
+                  </button>
+                </p>
+              ) : null}
+              {live ? (
+                <LogStream slug={slug} deploymentId={selected._id} />
+              ) : (
+                <div className="max-h-[60vh] min-h-[320px] flex-1 overflow-y-auto bg-black/45 p-3.5 font-mono text-[11.5px] leading-[1.75]">
+                  {logsLoading ? (
+                    <div className="flex items-center gap-2.5 text-faint">
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/25 border-t-transparent" />
+                      Retrieving the archived log…
+                    </div>
+                  ) : (
+                    <pre className="whitespace-pre-wrap break-words text-dim">
+                      {logs}
+                    </pre>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="grid flex-1 place-items-center px-6 text-center">
+              <div>
+                <p className="text-[13px] text-dim">
+                  Select a deployment to read its output.
+                </p>
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-faint">
+                  Archived logs replay in full
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ProjectPage() {
+  const { slug } = useParams<{ slug: string }>();
+  return (
+    <ProtectedRoute>
+      <AppShell>
+        <ProjectBody key={slug} />
+      </AppShell>
+    </ProtectedRoute>
+  );
 }
