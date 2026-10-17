@@ -1,816 +1,1201 @@
-"use client"
-import React, { useState, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { fetchWithAuth } from '../../lib/api'
-import ProtectedRoute from '../../components/ProtectedRoute'
-import Link from 'next/link'
+"use client";
 
-type RepoMode = 'mine' | 'any'
+import * as React from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronDown,
+  CircleAlert,
+  Github,
+  Globe2,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  Trash2,
+  Triangle,
+  X,
+} from "lucide-react";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import { AppShell } from "@/components/app/app-shell";
+import { FolderPicker } from "@/components/app/folder-picker";
+import { SegmentedTabs } from "@/components/ui/tabs";
+import { Select, type SelectOption } from "@/components/ui/select";
+import { Field, Input, SuffixInput } from "@/components/ui/field";
+import { Button, buttonStyles } from "@/components/ui/button";
+import { Pill } from "@/components/ui/badge";
+import {
+  APP_DOMAIN,
+  checkProjectName,
+  createProject,
+  detectFramework,
+  listBranches,
+  listRepos,
+  projectUrl,
+  type Detection,
+  type GitHubRepo,
+} from "@/lib/api";
+import { cn } from "@/lib/cn";
+import { environmentIssue, validSourcePath } from "@/lib/deployment-form";
+
+type Mode = "mine" | "url";
+type NameState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "taken"
+  | "invalid"
+  | "error";
+
+type RepoRef = {
+  owner: string;
+  repo: string;
+  fullName: string;
+  gitUrl: string;
+  defaultBranch?: string;
+};
+
+const steps = ["Source", "Configure", "Review"];
+
+const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function parseRepoUrl(
+  value: string,
+): { owner: string; repo: string; gitUrl: string } | null {
+  const match = value
+    .trim()
+    .match(
+      /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/i,
+    );
+  if (!match) return null;
+  return {
+    owner: match[1],
+    repo: match[2],
+    gitUrl: `https://github.com/${match[1]}/${match[2]}`,
+  };
+}
+
+function Stepper({
+  step,
+  onJump,
+}: {
+  step: number;
+  onJump: (index: number) => void;
+}) {
+  return (
+    <ol className="flex items-center gap-2">
+      {steps.map((label, index) => {
+        const done = index < step;
+        const active = index === step;
+        return (
+          <li key={label} className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => (index < step ? onJump(index) : undefined)}
+              disabled={index > step}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors",
+                index < step && "hover:bg-white/[0.04]",
+              )}
+            >
+              <span
+                className={cn(
+                  "grid h-5 w-5 place-items-center rounded-full border font-mono text-[10px]",
+                  active && "border-accent bg-accent text-ink",
+                  done && "border-accent/40 bg-accent/[0.1] text-accent",
+                  !active && !done && "border-white/[0.12] text-faint",
+                )}
+              >
+                {done ? <Check className="h-2.5 w-2.5" /> : `0${index + 1}`}
+              </span>
+              <span
+                className={cn(
+                  "text-[12px]",
+                  active ? "text-fg" : done ? "text-dim" : "text-faint",
+                )}
+              >
+                {label}
+              </span>
+            </button>
+            {index < steps.length - 1 ? (
+              <span
+                aria-hidden
+                className={cn(
+                  "h-px w-6",
+                  done ? "bg-accent/40" : "bg-white/[0.1]",
+                )}
+              />
+            ) : null}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function DetectionPanel({
+  detecting,
+  detection,
+  error,
+  path,
+}: {
+  detecting: boolean;
+  detection: Detection | null;
+  error: string;
+  path: string;
+}) {
+  if (detecting) {
+    return (
+      <div className="flex items-center gap-2.5 rounded-lg border border-white/[0.08] bg-white/[0.02] px-3 py-2.5 text-[12px] text-dim">
+        <span className="h-3.5 w-3.5 animate-spin rounded-full border border-white/25 border-t-transparent" />
+        Reading the manifest at{" "}
+        {path ? (
+          <code className="font-mono text-fg">{path}</code>
+        ) : (
+          "the repository root"
+        )}
+        …
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-start gap-2.5 rounded-lg border border-warn/20 bg-warn/[0.05] px-3 py-2.5 text-[12px] text-warn">
+        <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+        <span>{error}</span>
+      </div>
+    );
+  }
+
+  if (!detection) return null;
+
+  const supported = detection.supported === "YES";
+  const partial = detection.supported === "PARTIAL";
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border px-3 py-3",
+        supported && "border-mint/20 bg-mint/[0.04]",
+        partial && "border-warn/20 bg-warn/[0.04]",
+        !supported && !partial && "border-danger/25 bg-danger/[0.05]",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "grid h-6 w-6 place-items-center rounded border",
+            supported && "border-mint/25 text-mint",
+            partial && "border-warn/25 text-warn",
+            !supported && !partial && "border-danger/25 text-danger",
+          )}
+        >
+          <Triangle className="h-3 w-3" />
+        </span>
+        <span className="text-[13px] text-fg">{detection.framework}</span>
+        <span
+          className={cn(
+            "rounded border px-1.5 py-px font-mono text-[9px] uppercase tracking-[0.12em]",
+            supported && "border-mint/25 bg-mint/10 text-mint",
+            partial && "border-warn/25 bg-warn/10 text-warn",
+            !supported &&
+              !partial &&
+              "border-danger/25 bg-danger/10 text-danger",
+          )}
+        >
+          {supported ? "supported" : partial ? "warnings" : "unsupported"}
+        </span>
+        <span className="ml-auto font-mono text-[10px] text-faint">
+          detected automatically
+        </span>
+      </div>
+
+      {detection.notes ? (
+        <p className="mt-2 text-[11.5px] leading-relaxed text-dim">
+          {detection.notes}
+        </p>
+      ) : null}
+
+      {supported || partial ? (
+        <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10.5px] text-faint">
+          {detection.installCommand ? (
+            <span>install: {detection.installCommand}</span>
+          ) : null}
+          {detection.buildCommand ? (
+            <span>build: {detection.buildCommand}</span>
+          ) : null}
+          {detection.outputDir ? (
+            <span>output: {detection.outputDir}</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-6 border-b border-white/[0.06] py-2.5 last:border-b-0">
+      <span className="shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-faint">
+        {label}
+      </span>
+      <span className="min-w-0 break-words text-right font-mono text-[11.5px] text-dim">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function LaunchBody() {
+  const router = useRouter();
+  const [step, setStep] = React.useState(0);
+  const [mode, setMode] = React.useState<Mode>("mine");
+
+  // Source
+  const [repos, setRepos] = React.useState<GitHubRepo[]>([]);
+  const [reposLoading, setReposLoading] = React.useState(true);
+  const [reposError, setReposError] = React.useState("");
+  const [repoFullName, setRepoFullName] = React.useState("");
+  const [manualUrl, setManualUrl] = React.useState("");
+  const [branch, setBranch] = React.useState("");
+  const [branches, setBranches] = React.useState<string[]>([]);
+  const [branchesLoading, setBranchesLoading] = React.useState(false);
+  const [sourceDir, setSourceDir] = React.useState("");
+
+  // Detection
+  const [detection, setDetection] = React.useState<Detection | null>(null);
+  const [detecting, setDetecting] = React.useState(false);
+  const [detectError, setDetectError] = React.useState("");
+
+  // Configure
+  const [name, setName] = React.useState("");
+  const [nameTouched, setNameTouched] = React.useState(false);
+  const [nameState, setNameState] = React.useState<NameState>("idle");
+  const [checkedName, setCheckedName] = React.useState("");
+  const [installCommand, setInstallCommand] = React.useState("");
+  const [buildCommand, setBuildCommand] = React.useState("");
+  const [outputDir, setOutputDir] = React.useState("");
+  const [envVars, setEnvVars] = React.useState<
+    { key: string; value: string }[]
+  >([]);
+  const [advanced, setAdvanced] = React.useState(false);
+  const [showEnvValues, setShowEnvValues] = React.useState(false);
+  const [target, setTarget] = React.useState<
+    "auto" | "static" | "nextjs-lambda"
+  >("auto");
+  const submitLock = React.useRef(false);
+
+  // Submit
+  const [deploying, setDeploying] = React.useState(false);
+  const [submitError, setSubmitError] = React.useState("");
+  const [result, setResult] = React.useState<{
+    slug: string;
+    url: string;
+  } | null>(null);
+
+  const selectedRepo =
+    repos.find((item) => item.fullName === repoFullName) ?? null;
+  const parsedUrl = React.useMemo(() => parseRepoUrl(manualUrl), [manualUrl]);
+
+  const repoRef: RepoRef | null = React.useMemo(() => {
+    if (mode === "mine" && selectedRepo) {
+      return {
+        owner: selectedRepo.fullName.split("/")[0],
+        repo: selectedRepo.name,
+        fullName: selectedRepo.fullName,
+        gitUrl: selectedRepo.gitUrl,
+        defaultBranch: selectedRepo.defaultBranch,
+      };
+    }
+    if (mode === "url" && parsedUrl) {
+      return {
+        owner: parsedUrl.owner,
+        repo: parsedUrl.repo,
+        fullName: `${parsedUrl.owner}/${parsedUrl.repo}`,
+        gitUrl: parsedUrl.gitUrl,
+      };
+    }
+    return null;
+  }, [mode, selectedRepo, parsedUrl]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    listRepos(controller.signal)
+      .then((data) => {
+        if (!controller.signal.aborted) setRepos(data);
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted)
+          setReposError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not load repositories",
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setReposLoading(false);
+      });
+    return () => {
+      controller.abort();
+    };
+  }, []);
+
+  // A new repository resets everything that was derived from the previous one.
+  React.useEffect(() => {
+    setBranch("");
+    setBranches([]);
+    setSourceDir("");
+    setDetection(null);
+    setDetectError("");
+    setTarget("auto");
+    setInstallCommand("");
+    setBuildCommand("");
+    setOutputDir("");
+  }, [repoRef?.fullName]);
+
+  React.useEffect(() => {
+    if (!repoRef) return;
+    const controller = new AbortController();
+    setBranchesLoading(true);
+
+    listBranches(repoRef.owner, repoRef.repo, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setBranches(data);
+        const preferred =
+          repoRef.defaultBranch && data.includes(repoRef.defaultBranch)
+            ? repoRef.defaultBranch
+            : data.includes("main")
+              ? "main"
+              : data[0];
+        setBranch((current) =>
+          current && data.includes(current) ? current : (preferred ?? "main"),
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setBranches([]);
+          setBranch((current) => current || repoRef.defaultBranch || "main");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setBranchesLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [repoRef]);
+
+  // Framework detection follows repository + branch + folder.
+  React.useEffect(() => {
+    if (!repoRef || !branch.trim() || !validSourcePath(sourceDir)) return;
+    const controller = new AbortController();
+    setDetecting(true);
+    setDetectError("");
+    setDetection(null);
+    setInstallCommand("");
+    setBuildCommand("");
+    setOutputDir("");
+
+    const timer = window.setTimeout(() => {
+      detectFramework(
+        repoRef.owner,
+        repoRef.repo,
+        branch.trim(),
+        sourceDir,
+        controller.signal,
+      )
+        .then((data) => {
+          if (controller.signal.aborted) return;
+          setDetection(data);
+          if (data.supported !== "NO") {
+            setInstallCommand(data.installCommand ?? "");
+            setBuildCommand(data.buildCommand ?? "");
+            setOutputDir(data.outputDir ?? "");
+          }
+        })
+        .catch((cause: unknown) => {
+          if (controller.signal.aborted) return;
+          setDetection(null);
+          setDetectError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not read this repository. Set the build commands manually.",
+          );
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setDetecting(false);
+        });
+    }, 650);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [repoRef, branch, sourceDir]);
+
+  // Auto-suggest the project name from the repository the first time only.
+  React.useEffect(() => {
+    if (!repoRef || nameTouched) return;
+    const suggestion = repoRef.repo
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "");
+    setName(suggestion);
+    setNameState("idle");
+  }, [repoRef, nameTouched]);
+
+  React.useEffect(() => {
+    if (!name) {
+      setNameState("idle");
+      return;
+    }
+    if (!slugPattern.test(name) || name.length > 40) {
+      setNameState("invalid");
+      return;
+    }
+    setNameState("checking");
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      checkProjectName(name, controller.signal)
+        .then((data) => {
+          if (!controller.signal.aborted) {
+            setCheckedName(name);
+            setNameState(data.available ? "available" : "taken");
+          }
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setNameState("error");
+        });
+    }, 450);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [name]);
+
+  const urlError =
+    mode === "url" && manualUrl.trim().length > 0 && !parsedUrl
+      ? "Use a GitHub repository URL, for example https://github.com/owner/repo"
+      : "";
+
+  const invalidPath = !validSourcePath(sourceDir);
+  const sourceValid =
+    Boolean(repoRef && branch.trim()) && !urlError && !invalidPath;
+  const unsupported = detection?.supported === "NO" && target !== "static";
+  const nameValid =
+    !name ||
+    (slugPattern.test(name) &&
+      name.length <= 40 &&
+      nameState === "available" &&
+      checkedName === name);
+  const envError = environmentIssue(envVars);
+  const canDeploy =
+    sourceValid && nameValid && !detecting && !unsupported && !envError;
+
+  const setDir = (value: string) => {
+    setSourceDir(value.replace(/^\/+|\/+$/g, ""));
+  };
+
+  const reset = () => {
+    setStep(0);
+    setMode("mine");
+    setRepoFullName("");
+    setManualUrl("");
+    setBranch("");
+    setSourceDir("");
+    setDetection(null);
+    setName("");
+    setNameTouched(false);
+    setNameState("idle");
+    setInstallCommand("");
+    setBuildCommand("");
+    setOutputDir("");
+    setEnvVars([]);
+    setSubmitError("");
+    setResult(null);
+    setAdvanced(false);
+    setTarget("auto");
+  };
+
+  const deploy = async () => {
+    if (!repoRef || !canDeploy || submitLock.current) return;
+    submitLock.current = true;
+    setDeploying(true);
+    setSubmitError("");
+    try {
+      const env = Object.fromEntries(
+        envVars
+          .filter((item) => item.key.trim())
+          .map((item) => [item.key.trim(), item.value]),
+      );
+      const response = await createProject({
+        gitURL: repoRef.gitUrl,
+        project_name: name.trim() || undefined,
+        sourceDir: sourceDir || undefined,
+        branch: branch.trim(),
+        deploymentTarget: target,
+        installCommand: installCommand.trim() || undefined,
+        buildCommand: buildCommand.trim() || undefined,
+        outputDir: outputDir.trim() || undefined,
+        envVars: Object.keys(env).length > 0 ? env : undefined,
+      });
+      const data = response as {
+        data?: { projectSlug?: string; url?: string };
+      };
+      const slug = data.data?.projectSlug || "";
+      if (!slug)
+        throw new Error(
+          "The server did not return a project. Check your dashboard before trying again.",
+        );
+      setResult({
+        slug,
+        url: data.data?.url || (slug ? projectUrl(slug) : ""),
+      });
+    } catch (cause) {
+      setSubmitError(
+        cause instanceof Error
+          ? cause.message
+          : "The deployment could not be started",
+      );
+    } finally {
+      setDeploying(false);
+      submitLock.current = false;
+    }
+  };
+
+  const repoOptions: SelectOption[] = repos.map((repo) => ({
+    value: repo.fullName,
+    label: repo.fullName,
+    hint: repo.private ? "Private repository" : "Public repository",
+    meta: repo.private ? "private" : undefined,
+  }));
+
+  const branchOptions: SelectOption[] = branches.map((item) => ({
+    value: item,
+    label: item,
+  }));
+
+  if (result) {
+    return (
+      <div className="mx-auto max-w-[560px] py-6">
+        <div className="overflow-hidden rounded-xl border border-white/[0.09] bg-panel">
+          <div className="border-b border-white/[0.07] px-6 py-8 text-center">
+            <span className="mx-auto grid h-11 w-11 place-items-center rounded-full border border-accent/30 bg-accent/[0.08]">
+              <Check className="h-5 w-5 text-accent" />
+            </span>
+            <h1 className="mt-5 text-[20px] font-medium tracking-[-0.02em]">
+              Deployment queued
+            </h1>
+            <p className="mx-auto mt-2 max-w-[38ch] text-[13px] leading-relaxed text-faint">
+              The build task is starting. Open the project to follow the log
+              stream line by line.
+            </p>
+            {result.url ? (
+              <span className="mt-5 inline-flex items-center gap-2 rounded-lg border border-white/[0.1] bg-black/40 px-3 py-2 font-mono text-[11.5px] text-dim hover:text-fg">
+                <Globe2 className="h-3 w-3 text-faint" />
+                {result.url.replace(/^https?:\/\//, "")}
+              </span>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-2 p-4 sm:flex-row">
+            {result.slug ? (
+              <button
+                type="button"
+                onClick={() => router.push(`/project/${result.slug}`)}
+                className={buttonStyles("primary", "md", "flex-1")}
+              >
+                Open build logs
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
+            <Button
+              variant="outline"
+              size="md"
+              className="flex-1"
+              onClick={reset}
+            >
+              Deploy another
+            </Button>
+            <Link href="/dashboard" className={buttonStyles("ghost", "md")}>
+              Dashboard
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto max-w-[760px]">
+      <Link
+        href="/dashboard"
+        className="inline-flex items-center gap-1.5 text-[12px] text-faint transition-colors hover:text-fg"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        Projects
+      </Link>
+
+      <div className="mt-5 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-[26px] font-medium leading-tight tracking-[-0.03em]">
+            New deployment
+          </h1>
+          <p className="mt-1 text-[13px] text-faint">
+            {step === 0
+              ? "Choose the repository, branch and folder that should be built."
+              : step === 1
+                ? "Confirm the domain and how the build should run."
+                : "One last look before the build task starts."}
+          </p>
+        </div>
+        <Stepper
+          step={step}
+          onJump={(next) => {
+            if (!deploying) setStep(next);
+          }}
+        />
+      </div>
+
+      <div className="mt-6 overflow-hidden rounded-xl border border-white/[0.09] bg-panel">
+        <div className="p-5 sm:p-6">
+          {step === 0 ? (
+            <div className="space-y-5">
+              <SegmentedTabs
+                value={mode}
+                onChange={(next) => {
+                  setMode(next);
+                  setSourceDir("");
+                  setDetection(null);
+                }}
+                idPrefix="source-mode"
+                options={[
+                  {
+                    value: "mine",
+                    label: "Repositories",
+                    icon: <Github className="h-3.5 w-3.5" />,
+                  },
+                  {
+                    value: "url",
+                    label: "Public URL",
+                    icon: <Globe2 className="h-3.5 w-3.5" />,
+                  },
+                ]}
+              />
+
+              {mode === "mine" ? (
+                <Field
+                  label="Repository"
+                  htmlFor="repository"
+                  hint={
+                    reposError
+                      ? undefined
+                      : "Only repositories your GitHub account can read are listed."
+                  }
+                  error={reposError || undefined}
+                >
+                  <Select
+                    id="repository"
+                    value={repoFullName || null}
+                    options={repoOptions}
+                    onValueChange={setRepoFullName}
+                    placeholder={
+                      reposLoading
+                        ? "Loading repositories…"
+                        : "Select a repository"
+                    }
+                    searchPlaceholder="Filter repositories…"
+                    emptyLabel={
+                      reposLoading ? "Loading…" : "No repositories match"
+                    }
+                    loading={reposLoading}
+                    searchable
+                    invalid={Boolean(reposError)}
+                  />
+                </Field>
+              ) : (
+                <Field
+                  label="Repository URL"
+                  htmlFor="repository-url"
+                  hint="Public repositories work without extra GitHub scopes."
+                  error={urlError || undefined}
+                >
+                  <Input
+                    id="repository-url"
+                    value={manualUrl}
+                    onChange={(event) => setManualUrl(event.target.value)}
+                    placeholder="https://github.com/owner/repo"
+                    inputMode="url"
+                    className="font-mono text-[12.5px]"
+                  />
+                </Field>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field
+                  label="Branch"
+                  htmlFor="branch"
+                  hint={branchesLoading ? "Loading branches…" : undefined}
+                >
+                  {branches.length > 0 ? (
+                    <Select
+                      id="branch"
+                      value={branch || null}
+                      options={branchOptions}
+                      onValueChange={setBranch}
+                      placeholder="Select a branch"
+                      searchPlaceholder="Filter branches…"
+                      searchable
+                      disabled={!repoRef}
+                    />
+                  ) : (
+                    <Input
+                      id="branch"
+                      value={branch}
+                      onChange={(event) => setBranch(event.target.value)}
+                      placeholder="main"
+                      disabled={!repoRef}
+                      className="font-mono text-[12.5px]"
+                    />
+                  )}
+                </Field>
+
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-[13px] font-medium text-fg/90">
+                      Folder
+                    </span>
+                    <span className="font-mono text-[10px] text-faint">
+                      {sourceDir ? sourceDir : "repository root"}
+                    </span>
+                  </div>
+                  <FolderPicker
+                    id="source-dir"
+                    owner={repoRef?.owner}
+                    repo={repoRef?.repo}
+                    branch={branch}
+                    value={sourceDir}
+                    onChange={setDir}
+                  />
+                </div>
+              </div>
+
+              {invalidPath ? (
+                <p role="alert" className="text-[12px] text-danger">
+                  Use a relative folder path inside the repository, without ..
+                  or backslashes.
+                </p>
+              ) : null}
+              <DetectionPanel
+                detecting={detecting}
+                detection={detection}
+                error={detectError}
+                path={sourceDir}
+              />
+
+              {unsupported ? (
+                <p className="flex items-start gap-2 text-[12px] leading-relaxed text-danger">
+                  <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+                  This framework needs a different target. Choose another
+                  folder, or configure a static export on the next step.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {step === 1 ? (
+            <div className="space-y-6">
+              <Field
+                label="Project name"
+                htmlFor="project-name"
+                hint="Lowercase letters, numbers and hyphens. This becomes the subdomain."
+                error={
+                  nameState === "invalid"
+                    ? "Use lowercase letters, numbers and single hyphens only."
+                    : nameState === "taken"
+                      ? "That subdomain is already in use."
+                      : nameState === "error"
+                        ? "Could not check availability. Edit the name to retry, or leave it empty for an automatic name."
+                        : undefined
+                }
+                action={
+                  name && slugPattern.test(name) ? (
+                    <span
+                      className={cn(
+                        "flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.1em]",
+                        nameState === "available" && "text-mint",
+                        nameState === "taken" && "text-danger",
+                        nameState === "checking" && "text-faint",
+                        nameState === "invalid" && "text-danger",
+                      )}
+                    >
+                      {nameState === "checking" ? (
+                        <>
+                          <span className="h-2.5 w-2.5 animate-spin rounded-full border border-current border-t-transparent" />
+                          checking
+                        </>
+                      ) : nameState === "available" ? (
+                        <>
+                          <Check className="h-2.5 w-2.5" /> available
+                        </>
+                      ) : nameState === "taken" ? (
+                        <>
+                          <X className="h-2.5 w-2.5" /> taken
+                        </>
+                      ) : null}
+                    </span>
+                  ) : undefined
+                }
+              >
+                <SuffixInput
+                  id="project-name"
+                  maxLength={40}
+                  value={name}
+                  onChange={(event) => {
+                    setNameTouched(true);
+                    setName(
+                      event.target.value.toLowerCase().replace(/\s+/g, "-"),
+                    );
+                  }}
+                  placeholder={
+                    repoRef
+                      ? repoRef.repo.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+                      : "my-project"
+                  }
+                  invalid={nameState === "invalid" || nameState === "taken"}
+                  suffix={`.${APP_DOMAIN}`}
+                />
+              </Field>
+
+              <Field
+                label="Deployment target"
+                htmlFor="deployment-target"
+                hint="Use automatic detection for Next.js or a supported static build. Other frameworks need a static export."
+              >
+                <select
+                  id="deployment-target"
+                  value={target}
+                  onChange={(event) =>
+                    setTarget(event.target.value as typeof target)
+                  }
+                  className="h-10 w-full rounded-lg border border-white/[0.09] bg-panel px-3 text-[13px] text-fg"
+                >
+                  <option value="auto">Automatic</option>
+                  <option value="nextjs-lambda">
+                    Next.js — server rendering and API routes
+                  </option>
+                  <option value="static">Static website / static export</option>
+                </select>
+              </Field>
+              {unsupported ? (
+                <p role="alert" className="text-[12px] text-warn">
+                  This framework needs a static export. Choose the static target
+                  and its export command, or go back and select another app.
+                </p>
+              ) : null}
+              <div className="rounded-lg border border-white/[0.08]">
+                <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-3.5 py-2.5">
+                  <div>
+                    <p className="text-[12.5px] text-fg">Build settings</p>
+                    <p className="mt-0.5 text-[11px] text-faint">
+                      {detection && detection.supported !== "NO"
+                        ? "Filled from the detected framework."
+                        : "No framework detected — set these yourself."}
+                    </p>
+                  </div>
+                  {detection && detection.supported !== "NO" ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setInstallCommand(detection.installCommand ?? "");
+                        setBuildCommand(detection.buildCommand ?? "");
+                        setOutputDir(detection.outputDir ?? "");
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded border border-white/[0.1] px-2 py-1 font-mono text-[10px] text-faint hover:text-fg"
+                    >
+                      <RotateCcw className="h-2.5 w-2.5" />
+                      reset
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 p-3.5 sm:grid-cols-2">
+                  <Field label="Install command" htmlFor="install">
+                    <Input
+                      id="install"
+                      value={installCommand}
+                      onChange={(event) =>
+                        setInstallCommand(event.target.value)
+                      }
+                      placeholder="npm install"
+                      className="font-mono text-[12px]"
+                    />
+                  </Field>
+                  <Field label="Build command" htmlFor="build">
+                    <Input
+                      id="build"
+                      value={buildCommand}
+                      onChange={(event) => setBuildCommand(event.target.value)}
+                      placeholder="npm run build"
+                      className="font-mono text-[12px]"
+                    />
+                  </Field>
+                  <Field label="Output directory" htmlFor="output">
+                    <Input
+                      id="output"
+                      value={outputDir}
+                      onChange={(event) => setOutputDir(event.target.value)}
+                      placeholder={
+                        detection?.framework === "Next.js" &&
+                        target !== "static"
+                          ? "Managed by OpenNext"
+                          : "dist"
+                      }
+                      className="font-mono text-[12px]"
+                    />
+                  </Field>
+                  <Field label="Source folder" htmlFor="source-summary">
+                    <Input
+                      id="source-summary"
+                      value={sourceDir || "/"}
+                      readOnly
+                      className="font-mono text-[12px] text-dim"
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-white/[0.08]">
+                <button
+                  type="button"
+                  onClick={() => setAdvanced((state) => !state)}
+                  aria-expanded={advanced}
+                  className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left"
+                >
+                  <span className="text-[12.5px] text-fg">
+                    Environment variables
+                    <span className="ml-2 font-mono text-[10px] text-faint">
+                      {envVars.length}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "h-3.5 w-3.5 text-faint transition-transform duration-200",
+                      advanced && "rotate-180",
+                    )}
+                  />
+                </button>
+
+                {advanced ? (
+                  <div className="space-y-2 border-t border-white/[0.07] p-3.5">
+                    {envVars.length === 0 ? (
+                      <p className="py-1 text-[11.5px] text-faint">
+                        Nothing set. Add values needed by the build or the
+                        supported server runtime.
+                      </p>
+                    ) : (
+                      envVars.map((item, index) => (
+                        <div key={index} className="flex gap-2">
+                          <Input
+                            value={item.key}
+                            onChange={(event) => {
+                              const next = [...envVars];
+                              next[index] = {
+                                ...item,
+                                key: event.target.value,
+                              };
+                              setEnvVars(next);
+                            }}
+                            placeholder="NEXT_PUBLIC_API_URL"
+                            aria-label={`Variable ${index + 1} name`}
+                            className="font-mono text-[12px]"
+                          />
+                          <Input
+                            value={item.value}
+                            type={showEnvValues ? "text" : "password"}
+                            autoComplete="off"
+                            onChange={(event) => {
+                              const next = [...envVars];
+                              next[index] = {
+                                ...item,
+                                value: event.target.value,
+                              };
+                              setEnvVars(next);
+                            }}
+                            placeholder="value"
+                            aria-label={`Variable ${index + 1} value`}
+                            className="font-mono text-[12px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEnvVars(
+                                envVars.filter(
+                                  (_, position) => position !== index,
+                                ),
+                              )
+                            }
+                            aria-label={`Remove variable ${index + 1}`}
+                            className="grid h-10 w-9 shrink-0 place-items-center rounded-lg border border-white/[0.09] text-faint transition-colors hover:border-danger/30 hover:text-danger"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAdvanced(true);
+                        setEnvVars([...envVars, { key: "", value: "" }]);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded border border-white/[0.1] px-2 py-1 text-[11px] text-dim transition-colors hover:border-white/25 hover:text-fg"
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add variable
+                    </button>
+                    {envVars.length ? (
+                      <button
+                        type="button"
+                        className="ml-3 text-[12px] text-dim underline"
+                        onClick={() => setShowEnvValues((value) => !value)}
+                      >
+                        {showEnvValues ? "Hide values" : "Show values"}
+                      </button>
+                    ) : null}
+                    {envError ? (
+                      <p role="alert" className="text-[12px] text-danger">
+                        {envError}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {step === 2 ? (
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Pill tone="accent">
+                  <Sparkles className="h-2.5 w-2.5" />
+                  {detection?.framework || "custom build"}
+                </Pill>
+                {detection?.supported === "PARTIAL" ? (
+                  <Pill tone="warn">warnings</Pill>
+                ) : null}
+                <Pill>{mode === "mine" ? "github repo" : "public url"}</Pill>
+              </div>
+
+              <div className="rounded-lg border border-white/[0.08] px-3.5 py-1">
+                <SummaryRow label="Repository" value={repoRef?.fullName} />
+                <SummaryRow label="Branch" value={branch} />
+                <SummaryRow
+                  label="Target"
+                  value={
+                    target === "auto"
+                      ? detection?.framework || "Automatic"
+                      : target === "static"
+                        ? "Static website"
+                        : "Next.js server"
+                  }
+                />
+                <SummaryRow label="Folder" value={sourceDir || "/"} />
+                <SummaryRow
+                  label="Domain"
+                  value={
+                    name ? `${name}.${APP_DOMAIN}` : "generated at deploy time"
+                  }
+                />
+                <SummaryRow
+                  label="Install"
+                  value={installCommand || "default"}
+                />
+                <SummaryRow label="Build" value={buildCommand || "default"} />
+                <SummaryRow label="Output" value={outputDir || "default"} />
+                <SummaryRow
+                  label="Environment"
+                  value={envVars.filter((item) => item.key).length || "none"}
+                />
+              </div>
+
+              <p className="text-[12px] leading-relaxed text-faint">
+                Deploying creates a build task immediately. The previous
+                deployment keeps serving until this one succeeds — nothing is
+                overwritten on a failure.
+              </p>
+
+              {submitError ? (
+                <p
+                  role="alert"
+                  className="rounded-md border border-danger/25 bg-danger/[0.07] px-3 py-2 text-[12px] text-danger"
+                >
+                  {submitError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-white/[0.07] bg-black/20 px-5 py-3.5 sm:px-6">
+          <button
+            type="button"
+            onClick={() => setStep((current) => Math.max(0, current - 1))}
+            disabled={step === 0 || deploying}
+            className="inline-flex items-center gap-1.5 text-[12px] text-faint transition-colors hover:text-fg disabled:opacity-40"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back
+          </button>
+
+          <div className="flex items-center gap-2">
+            <span className="hidden font-mono text-[10px] uppercase tracking-[0.12em] text-faint sm:block">
+              step {step + 1} / {steps.length}
+            </span>
+            {step < 2 ? (
+              <Button
+                size="md"
+                onClick={() => setStep((current) => current + 1)}
+                disabled={
+                  (step === 0 && (!sourceValid || detecting)) ||
+                  (step === 1 && !canDeploy)
+                }
+              >
+                Continue
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button
+                size="md"
+                onClick={() => void deploy()}
+                loading={deploying}
+                disabled={!canDeploy || deploying}
+              >
+                Deploy project
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function LaunchPage() {
-    // --- Mode toggle ---
-    const [repoMode, setRepoMode] = useState<RepoMode>('mine')
-
-    // --- My Repos state ---
-    const [repos, setRepos] = useState<any[]>([])
-    const [selectedRepo, setSelectedRepo] = useState<any | null>(null)
-    const [branches, setBranches] = useState<string[]>([])
-    const [reposLoading, setReposLoading] = useState(true)
-    const [branchesLoading, setBranchesLoading] = useState(false)
-    const [isRepoOpen, setIsRepoOpen] = useState(false)
-    const [isBranchOpen, setIsBranchOpen] = useState(false)
-    const [repoSearch, setRepoSearch] = useState('')
-
-    // --- Any Repo state ---
-    const [manualGitUrl, setManualGitUrl] = useState('')
-    const [manualUrlError, setManualUrlError] = useState('')
-
-    // --- Shared build config ---
-    const [project_name, setProjectName] = useState('')
-    const [sourceDir, setSourceDir] = useState('')
-    const [installCommand, setInstallCommand] = useState('')
-    const [buildCommand, setBuildCommand] = useState('')
-    const [outputDir, setOutputDir] = useState('')
-    const [branch, setBranch] = useState('main')
-    const [envVars, setEnvVars] = useState<{ key: string, value: string }[]>([])
-    const [showAdvanced, setShowAdvanced] = useState(false)
-
-    // --- Detection state ---
-    const [detecting, setDetecting] = useState(false)
-    const [detectionResult, setDetectionResult] = useState<any | null>(null)
-
-    // --- Submit state ---
-    const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
-    const [deployedUrl, setDeployedUrl] = useState('')
-    const [projectSlug, setProjectSlug] = useState('')
-    const [errorMsg, setErrorMsg] = useState('')
-    const [validationError, setValidationError] = useState('')
-    const [nameChecking, setNameChecking] = useState(false)
-    const [nameAvailable, setNameAvailable] = useState<boolean | null>(null)
-
-    // -------------------------------------------------------------------------
-    // Load GitHub repositories on mount
-    // -------------------------------------------------------------------------
-    useEffect(() => {
-        const loadRepos = async () => {
-            setReposLoading(true)
-            try {
-                const res = await fetchWithAuth('/projects/github/repos')
-                if (res.ok) {
-                    const data = await res.json()
-                    setRepos(data.repos || [])
-                } else {
-                    setErrorMsg('Failed to load GitHub repositories. Please ensure you are logged in via GitHub.')
-                }
-            } catch (err) {
-                console.error(err)
-                setErrorMsg('Error loading repositories.')
-            } finally {
-                setReposLoading(false)
-            }
-        }
-        loadRepos()
-    }, [])
-
-    // -------------------------------------------------------------------------
-    // Reset shared state when mode changes
-    // -------------------------------------------------------------------------
-    const handleModeChange = (mode: RepoMode) => {
-        setRepoMode(mode)
-        setSelectedRepo(null)
-        setManualGitUrl('')
-        setManualUrlError('')
-        setBranches([])
-        setBranch('main')
-        setDetectionResult(null)
-        setErrorMsg('')
-        setStatus('idle')
-    }
-
-    // -------------------------------------------------------------------------
-    // Load branches when a repo is selected (My Repos mode)
-    // -------------------------------------------------------------------------
-    useEffect(() => {
-        if (!selectedRepo) {
-            setBranches([])
-            setBranch('main')
-            return
-        }
-
-        const [owner, repo] = selectedRepo.fullName.split('/')
-        const loadBranches = async () => {
-            setBranchesLoading(true)
-            try {
-                const res = await fetchWithAuth(`/projects/github/branches?owner=${owner}&repo=${repo}`)
-                if (res.ok) {
-                    const data = await res.json()
-                    setBranches(data.branches || [])
-                    if (data.branches?.includes(selectedRepo.defaultBranch)) {
-                        setBranch(selectedRepo.defaultBranch)
-                    } else if (data.branches?.length > 0) {
-                        setBranch(data.branches[0])
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to load branches', e)
-            } finally {
-                setBranchesLoading(false)
-            }
-        }
-        loadBranches()
-    }, [selectedRepo])
-
-    // -------------------------------------------------------------------------
-    // Framework detection hook (My Repos mode only)
-    // -------------------------------------------------------------------------
-    useEffect(() => {
-        if (!selectedRepo || !branch) {
-            setDetectionResult(null)
-            return
-        }
-
-        const [owner, repo] = selectedRepo.fullName.split('/')
-        const triggerDetection = async () => {
-            setDetecting(true)
-            try {
-                const res = await fetchWithAuth(`/projects/github/detect?owner=${owner}&repo=${repo}&branch=${branch}&path=${sourceDir}`)
-                if (res.ok) {
-                    const data = await res.json()
-                    const detection = data.detection
-                    setDetectionResult(detection)
-
-                    if (detection.supported !== 'NO') {
-                        setInstallCommand(detection.installCommand || '')
-                        setBuildCommand(detection.buildCommand || '')
-                        setOutputDir(detection.outputDir || '')
-                    } else {
-                        setInstallCommand('')
-                        setBuildCommand('')
-                        setOutputDir('')
-                    }
-                }
-            } catch (e) {
-                console.error('Failed to analyze repository', e)
-            } finally {
-                setDetecting(false)
-            }
-        }
-
-        const delayDebounce = setTimeout(() => {
-            triggerDetection()
-        }, 800)
-
-        return () => clearTimeout(delayDebounce)
-    }, [selectedRepo, branch, sourceDir])
-
-    // -------------------------------------------------------------------------
-    // Manual URL validation
-    // -------------------------------------------------------------------------
-    const validateManualUrl = (url: string) => {
-        setManualUrlError('')
-        if (!url) return
-        const githubRegex = /^https?:\/\/(www\.)?github\.com\/[\w.-]+\/[\w.-]+(\.git)?$/i
-        if (!githubRegex.test(url.trim())) {
-            setManualUrlError('Please enter a valid GitHub repository URL (e.g. https://github.com/owner/repo)')
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Env vars helpers
-    // -------------------------------------------------------------------------
-    const handleAddEnvVar = () => setEnvVars([...envVars, { key: '', value: '' }])
-    const handleRemoveEnvVar = (index: number) => setEnvVars(envVars.filter((_, i) => i !== index))
-    const handleEnvVarChange = (index: number, field: 'key' | 'value', val: string) => {
-        const updated = [...envVars]
-        updated[index][field] = val
-        setEnvVars(updated)
-    }
-
-    // -------------------------------------------------------------------------
-    // Project name validation
-    // -------------------------------------------------------------------------
-    const validateProjectNameLocal = (name: string) => {
-        setNameAvailable(null)
-        if (!name) { setValidationError(''); return }
-        const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
-        if (!slugRegex.test(name)) {
-            setValidationError('Project name must be lowercase, alphanumeric, and can contain hyphens (but not start/end with them).')
-        } else {
-            setValidationError('')
-        }
-    }
-
-    const checkNameAvailability = async () => {
-        if (!project_name.trim() || validationError) return
-        setNameChecking(true)
-        setNameAvailable(null)
-        try {
-            const res = await fetchWithAuth(`/projects/check-name?name=${encodeURIComponent(project_name.trim())}`)
-            if (res.ok) {
-                const data = await res.json()
-                setNameAvailable(data.available)
-            } else {
-                const data = await res.json()
-                setErrorMsg(data.error || 'Failed to check name availability')
-            }
-        } catch (err) {
-            console.error('Error checking project name:', err)
-            setErrorMsg('Failed to check name availability.')
-        } finally {
-            setNameChecking(false)
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Derived: the final gitURL to submit
-    // -------------------------------------------------------------------------
-    const resolvedGitUrl = repoMode === 'mine'
-        ? selectedRepo?.gitUrl || ''
-        : manualGitUrl.trim()
-
-    const canSubmit = () => {
-        if (status === 'loading') return false
-        if (!!validationError) return false
-        if (project_name.trim() !== '' && nameAvailable === false) return false
-        if (repoMode === 'mine') {
-            if (!selectedRepo) return false
-            if (detectionResult && detectionResult.supported === 'NO') return false
-        } else {
-            if (!manualGitUrl.trim() || !!manualUrlError) return false
-        }
-        return true
-    }
-
-    // -------------------------------------------------------------------------
-    // Submit handler
-    // -------------------------------------------------------------------------
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault()
-        if (!canSubmit()) return
-        setStatus('loading')
-        setErrorMsg('')
-        setDeployedUrl('')
-
-        try {
-            const body: any = {
-                gitURL: resolvedGitUrl,
-                project_name: project_name.trim() || undefined,
-                sourceDir: sourceDir.trim() || undefined,
-                installCommand: installCommand.trim() || undefined,
-                buildCommand: buildCommand.trim() || undefined,
-                outputDir: outputDir.trim() || undefined,
-                branch: branch.trim() || 'main'
-            }
-
-            if (envVars.length > 0) {
-                body.envVars = Object.fromEntries(
-                    envVars.filter(e => e.key.trim()).map(e => [e.key.trim(), e.value.trim()])
-                )
-            }
-
-            const res = await fetchWithAuth('/projects', {
-                method: 'POST',
-                body: JSON.stringify(body)
-            })
-
-            const data = await res.json()
-
-            if (!res.ok) {
-                if (res.status === 400 && data.error === 'Project name already taken') {
-                    setValidationError('Project name is already taken.')
-                    setStatus('idle')
-                    return
-                }
-                throw new Error(data.error || 'Failed to deploy project')
-            }
-
-            setStatus('success')
-            const slug = data.data?.projectSlug || ''
-            setProjectSlug(slug)
-            setDeployedUrl(data.data?.url || `https://${slug}.launch-pad.dev`)
-
-        } catch (err: any) {
-            console.error(err)
-            setStatus('error')
-            setErrorMsg(err.message || 'Something went wrong')
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // UI helpers
-    // -------------------------------------------------------------------------
-    const tabVariants = {
-        hidden: { opacity: 0, y: 8 },
-        visible: { opacity: 1, y: 0, transition: { duration: 0.25 } },
-        exit: { opacity: 0, y: -8, transition: { duration: 0.15 } }
-    }
-
-    return (
-        <ProtectedRoute>
-            <div className="min-h-screen bg-black text-white bg-[linear-gradient(to_bottom,#000,#200D42_34%,#4F21A1_65%,#A46EDB_82%)] py-[72px] sm:py-24 relative overflow-clip flex items-center justify-center">
-                <div className="absolute h-[375px] w-[750px] sm:w-[1536px] sm:h-[768px] lg:w-[2400px] llg:h-[800px] rounded-[100%] bg-black left-1/2 -translate-x-1/2 border border-[#B48CDE] bg-[radial-gradient(closest-side,#000_82%,#9560EB)] top-[calc(100%-96px)] sm:top-[calc(100%-120px)] opacity-50"></div>
-
-                <div className="container relative z-10 px-4">
-                    <motion.div
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.5 }}
-                        className="max-w-xl mx-auto bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-8 sm:p-12 shadow-2xl"
-                    >
-                        <div className="flex justify-between items-center mb-3">
-                            <h1 className="text-4xl sm:text-5xl font-bold tracking-tighter text-center w-full">Deploy your Project</h1>
-                        </div>
-                        <p className="text-white/70 text-center mb-8 text-lg">Select a repository to deploy.</p>
-
-                        {/* ── Mode Toggle Tabs ── */}
-                        <div className="flex bg-white/5 border border-white/10 rounded-xl p-1 mb-8 gap-1">
-                            <button
-                                type="button"
-                                id="tab-my-repos"
-                                onClick={() => handleModeChange('mine')}
-                                className={`flex-1 h-10 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
-                                    repoMode === 'mine'
-                                        ? 'bg-[#9560EB] text-white shadow-lg shadow-[#9560EB]/30'
-                                        : 'text-white/50 hover:text-white/80'
-                                }`}
-                            >
-                                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                    <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/>
-                                </svg>
-                                My Repositories
-                            </button>
-                            <button
-                                type="button"
-                                id="tab-any-repo"
-                                onClick={() => handleModeChange('any')}
-                                className={`flex-1 h-10 rounded-lg text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
-                                    repoMode === 'any'
-                                        ? 'bg-[#9560EB] text-white shadow-lg shadow-[#9560EB]/30'
-                                        : 'text-white/50 hover:text-white/80'
-                                }`}
-                            >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                                </svg>
-                                Any Public Repo
-                            </button>
-                        </div>
-
-                        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-
-                            {/* ── Repo Source Section (animated tab switch) ── */}
-                            <AnimatePresence mode="wait">
-                                {repoMode === 'mine' ? (
-                                    <motion.div
-                                        key="mine"
-                                        variants={tabVariants}
-                                        initial="hidden"
-                                        animate="visible"
-                                        exit="exit"
-                                        className="flex flex-col gap-6"
-                                    >
-                                        {/* Custom Scrollbar Style */}
-                                        <style>{`
-                                            .custom-dropdown-scrollbar::-webkit-scrollbar { width: 6px; }
-                                            .custom-dropdown-scrollbar::-webkit-scrollbar-track { background: transparent; }
-                                            .custom-dropdown-scrollbar::-webkit-scrollbar-thumb { background: rgba(149, 96, 235, 0.5); border-radius: 99px; }
-                                            .custom-dropdown-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(149, 96, 235, 0.8); }
-                                        `}</style>
-
-                                        {/* Repo Dropdown */}
-                                        <div className="space-y-2 relative">
-                                            <label className="text-sm font-medium text-white/80 ml-1">Select GitHub Repository</label>
-
-                                            <button
-                                                type="button"
-                                                id="repo-dropdown-trigger"
-                                                onClick={() => setIsRepoOpen(!isRepoOpen)}
-                                                className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
-                                            >
-                                                <span className={selectedRepo ? "text-white" : "text-white/40"}>
-                                                    {selectedRepo ? selectedRepo.fullName : '-- Select Repository --'}
-                                                </span>
-                                                <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isRepoOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
-                                            </button>
-
-                                            {isRepoOpen && (
-                                                <div
-                                                    className="fixed inset-0 z-40 bg-black/0 cursor-default"
-                                                    onClick={() => setIsRepoOpen(false)}
-                                                />
-                                            )}
-
-                                            {isRepoOpen && (
-                                                <div
-                                                    onWheel={(e) => e.stopPropagation()}
-                                                    style={{ backgroundColor: '#000000' }}
-                                                    className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.3)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
-                                                >
-                                                    <div className="max-h-64 overflow-y-auto overscroll-y-contain p-2.5 flex flex-col gap-1 custom-dropdown-scrollbar">
-                                                        <div className="relative mb-2 shrink-0">
-                                                            <input
-                                                                type="text"
-                                                                value={repoSearch}
-                                                                onChange={(e) => setRepoSearch(e.target.value)}
-                                                                placeholder="Search repositories..."
-                                                                className="w-full h-10 bg-white/5 border border-white/5 rounded-lg px-3.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[#9560EB]/50 placeholder:text-white/30"
-                                                                onClick={(e) => e.stopPropagation()}
-                                                            />
-                                                            {repoSearch && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setRepoSearch('')}
-                                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/40 hover:text-white"
-                                                                >✕</button>
-                                                            )}
-                                                        </div>
-
-                                                        {reposLoading ? (
-                                                            <div className="flex flex-col gap-2 p-1">
-                                                                {[1, 2, 3, 4].map((n) => (
-                                                                    <div key={n} className="h-10 bg-white/5 rounded-lg animate-pulse flex items-center px-3 justify-between">
-                                                                        <div className="h-3.5 bg-white/10 rounded w-2/3"></div>
-                                                                        <div className="h-3 bg-white/10 rounded w-10"></div>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        ) : (() => {
-                                                            const filtered = repos.filter(r => r.fullName.toLowerCase().includes(repoSearch.toLowerCase()))
-                                                            if (filtered.length === 0) {
-                                                                return <div className="text-center text-sm py-5 text-white/40">No matching repositories</div>
-                                                            }
-                                                            return filtered.map((repo) => (
-                                                                <button
-                                                                    key={repo.fullName}
-                                                                    type="button"
-                                                                    onClick={() => {
-                                                                        setSelectedRepo(repo)
-                                                                        setIsRepoOpen(false)
-                                                                        setRepoSearch('')
-                                                                    }}
-                                                                    className={`w-full h-10 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center justify-between duration-100 ${
-                                                                        selectedRepo?.fullName === repo.fullName
-                                                                            ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner'
-                                                                            : 'text-white/80 hover:text-white'
-                                                                    }`}
-                                                                >
-                                                                    <span className="truncate">{repo.fullName}</span>
-                                                                    {repo.private && (
-                                                                        <span className="text-[9px] bg-white/15 text-white/60 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider scale-90">Private</span>
-                                                                    )}
-                                                                </button>
-                                                            ))
-                                                        })()}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Branch selection */}
-                                        {selectedRepo && (
-                                            <div className="space-y-2 relative">
-                                                <label className="text-sm font-medium text-white/80 ml-1">Git Branch</label>
-
-                                                <button
-                                                    type="button"
-                                                    id="branch-dropdown-trigger"
-                                                    onClick={() => setIsBranchOpen(!isBranchOpen)}
-                                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 flex items-center justify-between font-medium focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white text-left shadow-lg hover:bg-white/15 active:scale-[0.99] duration-150"
-                                                >
-                                                    <span className="flex items-center gap-2">
-                                                        {branchesLoading && <span className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>}
-                                                        {branch}
-                                                    </span>
-                                                    <span className="text-white/40 text-xs transition-transform duration-200" style={{ transform: isBranchOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
-                                                </button>
-
-                                                {isBranchOpen && (
-                                                    <div
-                                                        className="fixed inset-0 z-40 bg-black/0 cursor-default"
-                                                        onClick={() => setIsBranchOpen(false)}
-                                                    />
-                                                )}
-
-                                                {isBranchOpen && (
-                                                    <div
-                                                        onWheel={(e) => e.stopPropagation()}
-                                                        style={{ backgroundColor: '#000000' }}
-                                                        className="absolute z-50 w-full mt-2 border border-white/15 rounded-xl shadow-[0_8px_32px_0_rgba(149,96,235,0.25)] overflow-hidden ring-1 ring-black/20 animate-in fade-in slide-in-from-top-2 duration-150 pointer-events-auto"
-                                                    >
-                                                        <div className="max-h-52 overflow-y-auto overscroll-y-contain p-2 flex flex-col gap-1 custom-dropdown-scrollbar">
-                                                            {branchesLoading ? (
-                                                                <div className="flex flex-col gap-1.5 p-1">
-                                                                    {[1, 2].map((n) => (
-                                                                        <div key={n} className="h-9 bg-white/5 rounded-lg animate-pulse flex items-center px-3">
-                                                                            <div className="h-3 bg-white/10 rounded w-1/3"></div>
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            ) : branches.length === 0 ? (
-                                                                <div className="text-center text-sm py-4 text-white/40">No branches loaded</div>
-                                                            ) : (
-                                                                branches.map((b) => (
-                                                                    <button
-                                                                        key={b}
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            setBranch(b)
-                                                                            setIsBranchOpen(false)
-                                                                        }}
-                                                                        className={`w-full h-9 px-3 rounded-lg text-left text-sm font-medium hover:bg-[#9560EB]/20 transition-all flex items-center duration-100 ${
-                                                                            branch === b
-                                                                                ? 'bg-[#9560EB]/35 border border-[#9560EB]/50 text-purple-200 shadow-inner'
-                                                                                : 'text-white/80 hover:text-white'
-                                                                        }`}
-                                                                    >{b}</button>
-                                                                ))
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        )}
-
-                                        {/* Framework Detection Panel */}
-                                        {detecting && (
-                                            <div className="p-4 bg-white/5 border border-white/10 rounded-xl text-center text-sm text-zinc-400 flex items-center justify-center gap-2">
-                                                <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>
-                                                Analyzing repository framework...
-                                            </div>
-                                        )}
-
-                                        {detectionResult && !detecting && (
-                                            <div className={`p-5 rounded-xl border flex flex-col gap-2 ${
-                                                detectionResult.supported === 'YES' ? 'bg-green-500/10 border-green-500/25' :
-                                                detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/10 border-yellow-500/25' :
-                                                'bg-red-500/10 border-red-500/25'
-                                            }`}>
-                                                <div className="flex justify-between items-center">
-                                                    <span className="text-sm font-medium text-white/60">Detected Framework</span>
-                                                    <span className={`px-2.5 py-0.5 rounded text-xs font-bold ${
-                                                        detectionResult.supported === 'YES' ? 'bg-green-500/20 text-green-300' :
-                                                        detectionResult.supported === 'PARTIAL' ? 'bg-yellow-500/20 text-yellow-300' :
-                                                        'bg-red-500/20 text-red-300'
-                                                    }`}>
-                                                        {detectionResult.framework} ({detectionResult.supported === 'YES' ? 'Supported' : detectionResult.supported === 'PARTIAL' ? 'Warnings' : 'Unsupported'})
-                                                    </span>
-                                                </div>
-                                                <p className="text-xs text-zinc-400 leading-relaxed mt-1">{detectionResult.notes}</p>
-                                            </div>
-                                        )}
-                                    </motion.div>
-
-                                ) : (
-                                    <motion.div
-                                        key="any"
-                                        variants={tabVariants}
-                                        initial="hidden"
-                                        animate="visible"
-                                        exit="exit"
-                                        className="flex flex-col gap-4"
-                                    >
-                                        {/* Info notice */}
-                                        <div className="flex items-start gap-3 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
-                                            <svg className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-                                                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                            <p className="text-xs text-blue-300 leading-relaxed">
-                                                Enter any <strong>public</strong> GitHub repository URL to deploy it. Private repos from other accounts are not accessible.
-                                            </p>
-                                        </div>
-
-                                        {/* Manual URL input */}
-                                        <div className="space-y-2">
-                                            <label htmlFor="manual-git-url" className="text-sm font-medium text-white/80 ml-1">GitHub Repository URL</label>
-                                            <input
-                                                id="manual-git-url"
-                                                type="url"
-                                                value={manualGitUrl}
-                                                onChange={(e) => {
-                                                    setManualGitUrl(e.target.value)
-                                                    validateManualUrl(e.target.value)
-                                                }}
-                                                placeholder="https://github.com/owner/repo"
-                                                className={`w-full h-14 bg-white/10 border ${manualUrlError ? 'border-red-500' : 'border-white/10'} rounded-xl px-5 font-medium placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white`}
-                                            />
-                                            {manualUrlError && (
-                                                <p className="text-red-400 text-xs ml-1">{manualUrlError}</p>
-                                            )}
-                                        </div>
-
-                                        {/* Branch input (manual, free text) */}
-                                        <div className="space-y-2">
-                                            <label htmlFor="manual-branch" className="text-sm font-medium text-white/80 ml-1">Branch</label>
-                                            <input
-                                                id="manual-branch"
-                                                type="text"
-                                                value={branch}
-                                                onChange={(e) => setBranch(e.target.value)}
-                                                placeholder="main"
-                                                className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-white/30 focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white"
-                                            />
-                                        </div>
-                                    </motion.div>
-                                )}
-                            </AnimatePresence>
-
-                            {/* ── Source Directory (shared) ── */}
-                            <div className="space-y-2">
-                                <label htmlFor="sourceDir" className="text-sm font-medium text-white/80 ml-1">Source Directory <span className="text-white/40 font-normal">(Optional)</span></label>
-                                <input
-                                    id="sourceDir"
-                                    type="text"
-                                    value={sourceDir}
-                                    onChange={(e) => setSourceDir(e.target.value)}
-                                    placeholder="frontend or packages/web"
-                                    className="w-full h-14 bg-white/10 border border-white/10 rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white"
-                                />
-                                <p className="text-white/40 text-xs ml-1">For monorepos: path to your frontend folder</p>
-                            </div>
-
-                            {/* ── Project Name (shared) ── */}
-                            <div className="space-y-2">
-                                <div className="flex justify-between items-center ml-1">
-                                    <label htmlFor="project_name" className="text-sm font-medium text-white/80">Project Name <span className="text-white/40 font-normal">(Optional)</span></label>
-                                    {project_name.trim() !== '' && !validationError && (
-                                        <button
-                                            type="button"
-                                            onClick={checkNameAvailability}
-                                            disabled={nameChecking}
-                                            className="text-xs bg-[#9560EB]/20 border border-[#9560EB]/40 hover:bg-[#9560EB]/40 text-purple-200 px-3 py-1 rounded-lg font-medium transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-                                        >
-                                            {nameChecking && <span className="w-2.5 h-2.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></span>}
-                                            {nameChecking ? 'Checking...' : 'Check Availability'}
-                                        </button>
-                                    )}
-                                </div>
-                                <div className="relative">
-                                    <input
-                                        id="project_name"
-                                        type="text"
-                                        value={project_name}
-                                        onChange={(e) => {
-                                            const val = e.target.value
-                                            setProjectName(val)
-                                            validateProjectNameLocal(val)
-                                        }}
-                                        placeholder="my-cool-project"
-                                        className={`w-full h-14 bg-white/10 border ${validationError ? 'border-red-500' : 'border-white/10'} rounded-xl px-5 font-medium placeholder:text-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#9560EB]/50 transition-all text-white pr-24`}
-                                    />
-                                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 text-sm font-mono hidden sm:inline-block">.launch-pad.dev</span>
-                                </div>
-                                {validationError && <p className="text-red-400 text-sm ml-1">{validationError}</p>}
-                                {nameAvailable !== null && !validationError && project_name.trim() !== '' && (
-                                    <p className={`text-xs ml-1 font-medium flex items-center gap-1.5 ${nameAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                        {nameAvailable ? <><span>✓</span>Domain name is available!</> : <><span>✕</span>Project name is already taken.</>}
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* ── Advanced Build Settings (shared) ── */}
-                            <div className="border border-white/10 rounded-xl overflow-hidden bg-white/5">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowAdvanced(!showAdvanced)}
-                                    className="w-full h-12 px-5 flex items-center justify-between text-sm font-semibold text-white/80 hover:bg-white/5 transition-colors"
-                                >
-                                    <span>Advanced Build Settings</span>
-                                    <span>{showAdvanced ? '▲' : '▼'}</span>
-                                </button>
-                                {showAdvanced && (
-                                    <div className="p-5 border-t border-white/10 space-y-4">
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-1">
-                                                <label className="text-xs text-white/60">Output Directory</label>
-                                                <input
-                                                    type="text"
-                                                    value={outputDir}
-                                                    onChange={(e) => setOutputDir(e.target.value)}
-                                                    placeholder="dist"
-                                                    className="w-full h-10 bg-white/10 border border-white/10 rounded-lg px-3 text-sm focus:outline-none text-white"
-                                                />
-                                            </div>
-                                            <div className="space-y-1">
-                                                <label className="text-xs text-white/60">Install Command</label>
-                                                <input
-                                                    type="text"
-                                                    value={installCommand}
-                                                    onChange={(e) => setInstallCommand(e.target.value)}
-                                                    placeholder="npm install"
-                                                    className="w-full h-10 bg-white/10 border border-white/10 rounded-lg px-3 text-sm focus:outline-none text-white"
-                                                />
-                                            </div>
-                                        </div>
-
-                                        <div className="space-y-1">
-                                            <label className="text-xs text-white/60">Build Command</label>
-                                            <input
-                                                type="text"
-                                                value={buildCommand}
-                                                onChange={(e) => setBuildCommand(e.target.value)}
-                                                placeholder="npm run build"
-                                                className="w-full h-10 bg-white/10 border border-white/10 rounded-lg px-3 text-sm focus:outline-none text-white"
-                                            />
-                                        </div>
-
-                                        <div className="space-y-2 pt-2">
-                                            <div className="flex justify-between items-center">
-                                                <label className="text-xs text-white/60 font-medium">Environment Variables</label>
-                                                <button
-                                                    type="button"
-                                                    onClick={handleAddEnvVar}
-                                                    className="text-xs text-purple-400 hover:text-purple-300 underline font-medium"
-                                                >+ Add Variable</button>
-                                            </div>
-                                            {envVars.map((item, idx) => (
-                                                <div key={idx} className="flex gap-2 items-center">
-                                                    <input
-                                                        type="text"
-                                                        value={item.key}
-                                                        onChange={(e) => handleEnvVarChange(idx, 'key', e.target.value)}
-                                                        placeholder="KEY"
-                                                        className="flex-1 h-9 bg-white/10 border border-white/10 rounded-lg px-3 text-xs text-white focus:outline-none"
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        value={item.value}
-                                                        onChange={(e) => handleEnvVarChange(idx, 'value', e.target.value)}
-                                                        placeholder="VALUE"
-                                                        className="flex-1 h-9 bg-white/10 border border-white/10 rounded-lg px-3 text-xs text-white focus:outline-none"
-                                                    />
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleRemoveEnvVar(idx)}
-                                                        className="text-red-400 hover:text-red-300 text-xs px-2"
-                                                    >✕</button>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* ── Submit Button ── */}
-                            <button
-                                type="submit"
-                                id="launch-project-btn"
-                                disabled={!canSubmit()}
-                                className="bg-white text-black h-14 rounded-xl px-5 font-bold text-lg mt-2 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                            >
-                                {status === 'loading' ? (
-                                    <>
-                                        <span className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></span>
-                                        Launching...
-                                    </>
-                                ) : 'Launch Project'}
-                            </button>
-                        </form>
-
-                        {/* ── Error Banner ── */}
-                        {status === 'error' && (
-                            <motion.div
-                                initial={{ opacity: 0, height: 0 }}
-                                animate={{ opacity: 1, height: 'auto' }}
-                                className="mt-6 p-4 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 text-center text-sm"
-                            >
-                                ⚠️ {errorMsg}
-                            </motion.div>
-                        )}
-
-                        {/* ── Success Panel ── */}
-                        {status === 'success' && (
-                            <motion.div
-                                initial={{ opacity: 0, scale: 0.95 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                className="mt-8 p-6 bg-[#9560EB]/20 border border-[#9560EB]/50 rounded-xl text-center"
-                            >
-                                <h3 className="text-xl font-bold text-white mb-2">🎉 Project Queued!</h3>
-                                <p className="text-white/70 text-sm mb-4">Your project is building. It will be available shortly at:</p>
-                                <a
-                                    href={deployedUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-block py-2 px-4 bg-[#9560EB] text-white rounded-lg font-medium hover:bg-[#8040E0] transition-colors break-all"
-                                >
-                                    {deployedUrl}
-                                </a>
-                                <p className="text-xs text-white/50 mt-4">(It may take a few minutes for the build to complete)</p>
-                                <div className="mt-4 flex gap-4 justify-center">
-                                    <Link
-                                        href={`/project/${projectSlug}`}
-                                        className="text-sm bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-500 font-medium"
-                                    >
-                                        View Project Details
-                                    </Link>
-                                    <Link href="/dashboard" className="text-sm text-purple-300 hover:text-white underline flex items-center">
-                                        Back to Dashboard
-                                    </Link>
-                                </div>
-                            </motion.div>
-                        )}
-                    </motion.div>
-                </div>
-            </div>
-        </ProtectedRoute>
-    )
+  return (
+    <ProtectedRoute>
+      <AppShell>
+        <LaunchBody />
+      </AppShell>
+    </ProtectedRoute>
+  );
 }

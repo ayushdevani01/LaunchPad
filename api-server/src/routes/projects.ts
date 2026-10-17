@@ -361,6 +361,77 @@ router.get('/github/branches', async (req: Request, res: Response) => {
     }
 })
 
+// Lists the folders directly below a path so the dashboard can offer a folder
+// picker instead of asking people to type a monorepo path from memory.
+router.get('/github/tree', async (req: Request, res: Response) => {
+    const { owner, repo, branch = 'main', path = '' } = req.query
+    const userId = res.locals.authUser.userId
+
+    if (!owner || !repo) {
+        return res.status(400).json({ error: 'owner and repo are required' })
+    }
+
+    try {
+        const user = await User.findById(userId)
+        const githubToken = await githubAccessToken(user)
+        if (!githubToken) {
+            return res.status(400).json({ error: 'GitHub account not linked.' })
+        }
+
+        const normalizedPath = String(path).replace(/^\/+|\/+$/g, '')
+        const { data } = await axios.get(
+            `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(String(branch))}?recursive=1`,
+            {
+                headers: {
+                    Authorization: `token ${githubToken}`,
+                    'User-Agent': 'LaunchPad-App',
+                    Accept: 'application/vnd.github.v3+json'
+                }
+            }
+        )
+
+        const tree: any[] = Array.isArray(data.tree) ? data.tree : []
+        const prefix = normalizedPath ? `${normalizedPath}/` : ''
+        const directoryNames = new Set<string>()
+        const relativeFiles = new Set<string>()
+
+        for (const entry of tree) {
+            if (!entry || typeof entry.path !== 'string') continue
+            if (!entry.path.startsWith(prefix)) continue
+
+            const relative = entry.path.slice(prefix.length)
+            if (!relative) continue
+
+            const [first] = relative.split('/')
+            if (entry.type === 'tree') directoryNames.add(first)
+            if (entry.type === 'blob') relativeFiles.add(relative)
+        }
+
+        const directories = Array.from(directoryNames)
+            .sort((a, b) => a.localeCompare(b))
+            .slice(0, 100)
+            .map((name) => ({
+                name,
+                path: prefix ? `${normalizedPath}/${name}` : name,
+                hasPackageJson: relativeFiles.has(`${name}/package.json`)
+            }))
+
+        return res.json({
+            path: normalizedPath,
+            directories,
+            hasPackageJson: relativeFiles.has('package.json'),
+            truncated: Boolean(data.truncated)
+        })
+    } catch (err: any) {
+        const status = err.response?.status
+        console.error('Failed to list repository tree:', err.response?.data || err.message)
+        if (status === 404 || status === 409) {
+            return res.status(404).json({ error: 'That branch or folder could not be found.' })
+        }
+        return res.status(500).json({ error: 'Failed to list repository folders' })
+    }
+})
+
 router.get('/github/detect', async (req: Request, res: Response) => {
     const { owner, repo, path = '', branch = 'main' } = req.query
     const userId = res.locals.authUser.userId
