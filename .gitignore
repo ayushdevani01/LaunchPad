@@ -10,3 +10,4 @@ dist/
 build-server/bin/
 build-server/*.exe
 runtime.env
+.secrets/
