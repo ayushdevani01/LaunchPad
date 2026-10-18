@@ -1,12 +1,14 @@
 {
   "name": "api-server",
   "version": "1.0.0",
-  "description": "API server for LaunchPad - triggers Cloud Run Jobs",
+  "description": "LaunchPad API, GitHub App integration and Kafka deployment dispatch",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node index.ts",
+    "worker": "node dist/worker.js",
+    "github:setup": "node scripts/register-github-app.cjs",
     "test": "npm run build && node --test tests/*.test.cjs"
   },
   "dependencies": {
@@ -18,6 +20,7 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.3",
+    "kafkajs": "^2.2.4",
     "mongoose": "^9.0.2",
     "random-word-slugs": "^0.1.7"
   },
