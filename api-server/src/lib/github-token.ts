@@ -30,7 +30,8 @@ export async function githubAccessToken(user: IUser | null): Promise<string> {
         let data: any
         try {
             const response = await axios.post('https://github.com/login/oauth/access_token', {
-                client_id: process.env.GITHUB_CLIENT_ID, client_secret: process.env.GITHUB_CLIENT_SECRET,
+                client_id: current.githubTokenKind === 'app' ? process.env.GITHUB_APP_CLIENT_ID : process.env.GITHUB_CLIENT_ID,
+                client_secret: current.githubTokenKind === 'app' ? process.env.GITHUB_APP_CLIENT_SECRET : process.env.GITHUB_CLIENT_SECRET,
                 grant_type: 'refresh_token', refresh_token: current.githubRefreshToken
             }, {headers: {Accept: 'application/json'}, timeout: 10000})
             data = response.data
