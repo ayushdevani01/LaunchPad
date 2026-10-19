@@ -6,6 +6,8 @@ export interface IUser extends Document {
     username: string
     password: string
     githubToken?: string
+    githubId?: number
+    githubTokenKind?: 'app' | 'oauth'
     githubRefreshToken?: string
     githubTokenExpiresAt?: Date
     githubRefreshExpiresAt?: Date
@@ -18,6 +20,8 @@ const UserSchema = new Schema<IUser>({
     username: { type: String, required: true },
     password: { type: String, required: true },
     githubToken: { type: String },
+    githubId: { type: Number, unique: true, sparse: true },
+    githubTokenKind: { type: String, enum: ['app', 'oauth'] },
     githubRefreshToken: { type: String },
     githubTokenExpiresAt: { type: Date },
     githubRefreshExpiresAt: { type: Date },

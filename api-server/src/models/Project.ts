@@ -13,6 +13,10 @@ export interface IProject extends Document {
     envVars?: Map<string, string>
     currentDeployment?: mongoose.Types.ObjectId
     latestDeployment?: mongoose.Types.ObjectId
+    githubRepositoryId?: number
+    githubInstallationId?: number
+    autoDeploy?: boolean
+    watchPaths?: string[]
     deploymentTarget?: 'auto' | 'static' | 'nextjs-lambda'
     createdAt: Date
     updatedAt: Date
@@ -30,6 +34,10 @@ const ProjectSchema = new Schema<IProject>({
     envVars: { type: Map, of: String },
     currentDeployment: { type: Schema.Types.ObjectId, ref: 'Deployment' },
     latestDeployment: { type: Schema.Types.ObjectId, ref: 'Deployment' },
+    githubRepositoryId: Number,
+    githubInstallationId: Number,
+    autoDeploy: { type: Boolean, default: true },
+    watchPaths: { type: [String], default: [] },
     deploymentTarget: { type: String, enum: ['auto', 'static', 'nextjs-lambda'], default: 'auto' },
 }, { timestamps: true })
 

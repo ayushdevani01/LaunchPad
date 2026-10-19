@@ -9,6 +9,15 @@ export interface IDeployment extends Document {
     taskArn?: string
     runtime?: Record<string, any>
     failureReason?: string
+    trigger?: 'manual' | 'push'
+    queuePublishedAt?: Date
+    queueLeaseUntil?: Date
+    dispatchLeaseUntil?: Date
+    dispatchAttempts?: number
+    dispatchRequest?: Record<string, any>
+    cloneAuthHash?: string
+    cloneAuthExpiresAt?: Date
+    cloneAuthConsumedAt?: Date
     createdAt: Date
     updatedAt: Date
 }
@@ -21,8 +30,19 @@ const DeploymentSchema = new Schema<IDeployment>({
     taskArn: { type: String },
     runtime: { type: Schema.Types.Mixed },
     failureReason: { type: String },
+    trigger: { type: String, enum: ['manual', 'push'], default: 'manual' },
+    queuePublishedAt: Date,
+    queueLeaseUntil: Date,
+    dispatchLeaseUntil: Date,
+    dispatchAttempts: { type: Number, default: 0 },
+    dispatchRequest: { type: Schema.Types.Mixed, select: false },
+    cloneAuthHash: { type: String, select: false },
+    cloneAuthExpiresAt: { type: Date, select: false },
+    cloneAuthConsumedAt: { type: Date, select: false },
 }, { timestamps: true })
 
 DeploymentSchema.index({ projectId: 1 })
+DeploymentSchema.index({ status: 1, queuePublishedAt: 1 })
+DeploymentSchema.index({ projectId: 1, commitHash: 1, trigger: 1 }, { unique: true, partialFilterExpression: { trigger: 'push', commitHash: { $type: 'string' } } })
 
 export const Deployment = mongoose.model<IDeployment>('Deployment', DeploymentSchema)
