@@ -5,6 +5,7 @@ import { signToken } from '../lib/jwt'
 import axios from 'axios'
 import { randomBytes, timingSafeEqual } from 'crypto'
 import { tokenFields } from '../lib/github-token'
+import { appConfigured } from '../lib/github-app'
 
 const router = Router()
 
@@ -141,24 +142,24 @@ router.get('/google/callback', async (req, res) => {
 })
 
 router.get('/github', (req, res) => {
-    const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID
-    const REDIRECT_URI = process.env.GITHUB_CALLBACK_URL || 'http://localhost:9000/auth/github/callback'
+    const GITHUB_CLIENT_ID = appConfigured() ? process.env.GITHUB_APP_CLIENT_ID : process.env.GITHUB_CLIENT_ID
+    const REDIRECT_URI = appConfigured() ? (process.env.GITHUB_APP_CALLBACK_URL || 'https://api.launch-pad.dev/auth/github-app/callback') : (process.env.GITHUB_CALLBACK_URL || 'http://localhost:9000/auth/github/callback')
 
-    if (!GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) return res.status(503).json({error: 'GitHub sign-in is not configured'})
+    if (!GITHUB_CLIENT_ID || !(appConfigured() ? process.env.GITHUB_APP_CLIENT_SECRET : process.env.GITHUB_CLIENT_SECRET)) return res.status(503).json({error: 'GitHub sign-in is not configured'})
     const state = randomBytes(32).toString('hex')
     const secure = REDIRECT_URI.startsWith('https://')
     res.cookie(secure ? '__Host-launchpad_oauth' : 'launchpad_oauth', state, {httpOnly:true, secure, sameSite:'lax', path:'/', maxAge:600000})
-    const url = `https://github.com/login/oauth/authorize?${new URLSearchParams({client_id: GITHUB_CLIENT_ID, redirect_uri: REDIRECT_URI, scope:'user:email,repo', state})}`
+    const url = `https://github.com/login/oauth/authorize?${new URLSearchParams({client_id: GITHUB_CLIENT_ID, redirect_uri: REDIRECT_URI, ...(appConfigured() ? {} : {scope:'user:email'}), state})}`
     res.redirect(url)
 })
 
-router.get('/github/callback', async (req, res) => {
+router.get(['/github/callback', '/github-app/callback'], async (req, res) => {
     const { code } = req.query
-    const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID
-    const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET
+    const GITHUB_CLIENT_ID = appConfigured() ? process.env.GITHUB_APP_CLIENT_ID : process.env.GITHUB_CLIENT_ID
+    const GITHUB_CLIENT_SECRET = appConfigured() ? process.env.GITHUB_APP_CLIENT_SECRET : process.env.GITHUB_CLIENT_SECRET
     const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
 
-    const secure = (process.env.GITHUB_CALLBACK_URL || '').startsWith('https://')
+    const secure = (appConfigured() ? (process.env.GITHUB_APP_CALLBACK_URL || 'https://api.launch-pad.dev/auth/github-app/callback') : (process.env.GITHUB_CALLBACK_URL || '')).startsWith('https://')
     const cookieName = secure ? '__Host-launchpad_oauth' : 'launchpad_oauth'
     const cookies = Object.fromEntries((req.headers.cookie || '').split(';').map(v=>v.trim().split('=')))
     const expected = cookies[cookieName]
@@ -172,7 +173,7 @@ router.get('/github/callback', async (req, res) => {
             client_secret: GITHUB_CLIENT_SECRET,
             code,
         }, {
-            headers: { Accept: 'application/json' }
+            headers: { Accept: 'application/json' }, timeout: 15000
         })
 
         const fields = tokenFields(data)
@@ -189,8 +190,23 @@ router.get('/github/callback', async (req, res) => {
         const primaryEmail = emails.find((e: any) => e.primary && e.verified)?.email || emails.find((e: any) => e.verified)?.email
         if (!primaryEmail) throw new Error('A verified GitHub email is required')
 
-        // Check if user exists
-        let user = await User.findOne({ email: primaryEmail })
+        if (!Number.isSafeInteger(userProfile.id)) throw new Error('Invalid GitHub identity')
+        let user = await User.findOne({ githubId: userProfile.id })
+        if (!user) {
+            const legacy = await User.findOne({ email: primaryEmail })
+            if (legacy) {
+                // Migration requires proof of the old GitHub identity, not just
+                // a matching email address from another authentication method.
+                if (!legacy.githubToken || legacy.githubId) throw new Error('Sign in to your existing account to link GitHub')
+                const previous = await axios.get('https://api.github.com/user', {
+                    headers: { Authorization: `Bearer ${legacy.githubToken}` }, timeout: 15000
+                })
+                if (previous.data.id !== userProfile.id) throw new Error('GitHub identity does not match')
+                user = legacy
+            }
+        }
+        const identity: { githubId: number; githubTokenKind: 'app' | 'oauth' } = { githubId: userProfile.id, githubTokenKind: appConfigured() ? 'app' : 'oauth' }
+
 
         if (!user) {
             user = await User.create({
@@ -198,9 +214,10 @@ router.get('/github/callback', async (req, res) => {
                 username: userProfile.login,
                 password: await bcrypt.hash(randomBytes(32).toString('hex'), 10),
                 ...fields,
+                ...identity,
             })
         } else {
-            Object.assign(user, fields)
+            Object.assign(user, fields, identity)
             await user.save()
         }
 

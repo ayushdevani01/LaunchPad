@@ -15,6 +15,7 @@ test('GitHub authorization binds a short-lived secure state cookie and rejects f
   assert.equal(start.status,302);
   const url=new URL(start.headers.get('location'));const state=url.searchParams.get('state');
   assert.match(state,/^[a-f0-9]{64}$/);
+  assert.equal(url.searchParams.get('scope'),'user:email');
   const cookie=start.headers.get('set-cookie');assert.match(cookie,/__Host-launchpad_oauth=/);assert.match(cookie,/HttpOnly/);assert.match(cookie,/Secure/);assert.match(cookie,/SameSite=Lax/);
   assert.equal((await fetch(base+'/auth/github/callback?code=fake&state='+state)).status,400);
   assert.equal((await fetch(base+'/auth/github/callback?code=fake&state='+state,{headers:{cookie:'__Host-launchpad_oauth='+'a'.repeat(64)}})).status,400);
