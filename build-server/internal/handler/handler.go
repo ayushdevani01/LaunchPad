@@ -25,7 +25,7 @@ func Run(ctx context.Context) int {
 		fmt.Fprintln(os.Stderr, "Build configuration:", err)
 		return 1
 	}
-	private := []string{os.Getenv("GITHUB_TOKEN"), os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("AWS_SESSION_TOKEN"), r.RedisURL}
+	private := []string{os.Getenv("GITHUB_TOKEN"), r.SourceAuthorization, os.Getenv("AWS_SECRET_ACCESS_KEY"), os.Getenv("AWS_SESSION_TOKEN"), r.RedisURL}
 	for _, v := range r.UserEnv {
 		if len(v) >= 4 {
 			private = append(private, v)

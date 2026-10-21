@@ -28,6 +28,7 @@ func Load() (domain.Request, error) {
 	r := domain.Request{
 		ProjectID: os.Getenv("CLIENT_PROJECT_ID"), DeploymentID: os.Getenv("DEPLOYMENT_ID"), GitURL: os.Getenv("GIT_REPOSITORY__URL"),
 		Branch: get("BRANCH", "main"), SourceDir: get("SOURCE_DIR", "."), InstallCommand: os.Getenv("INSTALL_COMMAND"), BuildCommand: os.Getenv("BUILD_COMMAND"),
+		CommitSHA: os.Getenv("COMMIT_SHA"), SourceCredentialURL: os.Getenv("SOURCE_CREDENTIAL_URL"), SourceAuthorization: os.Getenv("SOURCE_AUTHORIZATION"),
 		OutputDir: os.Getenv("BUILD_OUTPUT_DIR"), Target: get("DEPLOYMENT_TARGET", "auto"), Bucket: os.Getenv("AWS_BUCKET_NAME"),
 		Region: get("AWS_REGION", "ap-south-1"), Endpoint: os.Getenv("AWS_ENDPOINT"), RedisURL: os.Getenv("REDIS_URL"), CallbackURL: os.Getenv("API_CALLBACK_URL"),
 		WorkDir: get("BUILD_WORK_DIR", "/home/app/work"), Architecture: get("LAMBDA_ARCHITECTURE", nativeArchitecture), OpenNextVersion: "4.1.12",
@@ -46,8 +47,17 @@ func Load() (domain.Request, error) {
 			return r, fmt.Errorf("USER_ENV_VARS must be an object of string values")
 		}
 	}
+	if r.CommitSHA != "" && !regexp.MustCompile(`^[a-f0-9]{40}$`).MatchString(r.CommitSHA) {
+		return r, fmt.Errorf("invalid COMMIT_SHA")
+	}
+	if r.SourceCredentialURL != "" {
+		u, err := url.ParseRequestURI(r.SourceCredentialURL)
+		if err != nil || u.Scheme != "https" || u.User != nil || r.SourceAuthorization == "" {
+			return r, fmt.Errorf("source credential endpoint must use HTTPS and a one-use authorization")
+		}
+	}
 	for key := range r.UserEnv {
-		if !regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(key) || strings.HasPrefix(key, "AWS_") || strings.HasPrefix(key, "LAMBDA_") || strings.HasPrefix(key, "CACHE_") || strings.HasPrefix(key, "REVALIDATION_") || key == "GIT_ASKPASS" || key == "GITHUB_TOKEN" || key == "PATH" {
+		if !regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`).MatchString(key) || strings.HasPrefix(key, "AWS_") || strings.HasPrefix(key, "LAMBDA_") || strings.HasPrefix(key, "CACHE_") || strings.HasPrefix(key, "REVALIDATION_") || strings.HasPrefix(key, "SOURCE_") || key == "GIT_ASKPASS" || key == "GITHUB_TOKEN" || key == "PATH" {
 			return r, fmt.Errorf("reserved or invalid application environment key: %s", key)
 		}
 	}

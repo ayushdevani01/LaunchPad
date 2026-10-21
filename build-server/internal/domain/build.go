@@ -9,6 +9,7 @@ type Log func(stage, level, stream, message string)
 
 type Request struct {
 	ProjectID, DeploymentID, GitURL, Branch, SourceDir                   string
+	CommitSHA, SourceCredentialURL, SourceAuthorization                  string
 	InstallCommand, BuildCommand, OutputDir, Target                      string
 	Bucket, Region, Endpoint, RedisURL, CallbackURL, WorkDir             string
 	Architecture, OpenNextVersion                                        string
