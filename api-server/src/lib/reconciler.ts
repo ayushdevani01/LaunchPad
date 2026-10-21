@@ -14,7 +14,8 @@ export async function reconcileOnce() {
     if (running) return
     running = true
     try {
-        const deployments = await Deployment.find({ status: { $in: ['PENDING', 'BUILDING'] }, taskArn: { $exists: true } })
+        const deployments = await Deployment.find({ status: { $in: ['PENDING', 'BUILDING'] },
+            $or: [{ taskArn: { $exists: true } }, { dispatchRequest: { $exists: true } }] })
         for (const deployment of deployments) {
             const project = await Project.findById(deployment.projectId)
             if (!project) continue
