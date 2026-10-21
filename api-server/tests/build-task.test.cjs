@@ -23,7 +23,7 @@ async function fixture(send, check, extra = {}) {
         ECSClient.prototype.send = send;
         Project.updateOne = async () => ({ modifiedCount: 1 });
         Deployment.updateOne = async (filter, update) => { failures.push(update.$set); return { modifiedCount: 1 }; };
-        await check({ failures, project: { _id: 'project', slug: 'test', gitUrl: 'https://example.test/repo.git' }, deployment: { _id: 'deployment', save: async () => {} } });
+        await check({ failures, project: { _id: 'project', slug: 'test', gitUrl: 'https://example.test/repo.git' }, deployment: { _id: 'deployment', commitHash: 'a'.repeat(40), save: async () => {} } });
     } finally {
         ECSClient.prototype.send = original.send;
         Project.updateOne = original.project;
@@ -50,8 +50,10 @@ test('Fargate launches with remote log/callback endpoints and excludes API crede
         const env = Object.fromEntries(launch.overrides.containerOverrides[0].environment.map(v => [v.name, v.value]));
         assert.equal(env.REDIS_URL, 'redis://:test-password@10.0.0.1:6379');
         assert.equal(env.API_CALLBACK_URL, 'https://api.example.test/projects/test/deployments/deployment/status');
-        assert.equal(env.GITHUB_TOKEN, 'test-github-token');
-        for (const key of ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'CF_API_TOKEN', 'JWT_SECRET']) assert.ok(!(key in env));
+        assert.equal(env.SOURCE_AUTHORIZATION, 'test-github-token');
+        assert.equal(env.COMMIT_SHA, 'a'.repeat(40));
+        assert.equal(env.SOURCE_CREDENTIAL_URL, 'https://api.example.test/build-source/deployment');
+        for (const key of ['GITHUB_TOKEN', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'CF_API_TOKEN', 'JWT_SECRET']) assert.ok(!(key in env));
     });
 });
 
@@ -63,7 +65,7 @@ test('capacity includes paginated pending/running jobs and prevents another laun
     }, async ({ project, deployment, failures }) => {
         await assert.rejects(triggerBuildTask(project, deployment, ''), /capacity is busy/);
         assert.equal(lists, 2);
-        assert.equal(failures[0].status, 'FAILED');
+        assert.equal(failures.length, 0); // Capacity leaves the Kafka job pending.
     });
 });
 
@@ -87,7 +89,7 @@ test('SDK errors do not expose task environment values', async () => {
         throw new Error('private SDK payload test-api-secret');
     }, async ({ project, deployment, failures }) => {
         await assert.rejects(triggerBuildTask(project, deployment, ''), /^Error: Build task could not start$/);
-        assert.equal(failures[0].failureReason, 'Build task could not start');
+        assert.ok(!failures.some(update => update.status === 'FAILED'));
     });
 });
 
