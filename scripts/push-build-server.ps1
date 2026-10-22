@@ -10,6 +10,6 @@ if ($LASTEXITCODE -ne 0) { throw 'ECR authentication failed.' }
 $password | docker login --username AWS --password-stdin $registry
 $password = $null
 if ($LASTEXITCODE -ne 0) { throw 'Docker login failed.' }
-docker buildx build --platform linux/arm64 --provenance=false --tag "$($repository.Trim()):latest" --push (Join-Path $PSScriptRoot 'build-server')
+docker buildx build --platform linux/arm64 --provenance=false --tag "$($repository.Trim()):latest" --push (Join-Path (Split-Path $PSScriptRoot -Parent) 'build-server')
 if ($LASTEXITCODE -ne 0) { throw 'Worker image build/push failed. Existing builds keep their current image.' }
 Write-Host 'Worker image published. New Fargate tasks will pull it automatically.'
