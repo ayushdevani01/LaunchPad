@@ -9,7 +9,7 @@ const facts = ["GitHub sign-in", "Live build output", "TLS project URLs"];
 export function Hero() {
   return (
     <section aria-labelledby="hero-title" className="pb-16 pt-28 sm:pb-20 sm:pt-36">
-      <div className="mx-auto grid max-w-[1180px] items-center gap-12 px-5 sm:px-8 lg:grid-cols-2 lg:gap-14 xl:gap-20">
+      <div className="mx-auto grid w-full items-center gap-12 px-5 sm:px-8 lg:grid-cols-2 lg:gap-14 xl:gap-20">
         <Reveal y={10}>
           <p className="flex items-center gap-2.5 text-[13px] leading-6 text-dim sm:text-sm">
             <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />

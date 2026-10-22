@@ -10,7 +10,7 @@ type Tone = "muted" | "default" | "ok" | "warn";
 const script: { stage: string; text: string; tone: Tone; hold: number }[] = [
   { stage: "clone", text: "git clone acme/storefront --depth 1", tone: "muted", hold: 620 },
   { stage: "detect", text: "framework: next@14.2 · root: apps/web", tone: "default", hold: 560 },
-  { stage: "install", text: "npm ci — 412 packages in 8.2s", tone: "default", hold: 560 },
+  { stage: "install", text: "npm ci: 412 packages in 8.2s", tone: "default", hold: 560 },
   { stage: "build", text: "next build", tone: "default", hold: 420 },
   { stage: "build", text: "compiled 11 routes in 4.8s", tone: "muted", hold: 520 },
   { stage: "build", text: "static assets emitted → .next", tone: "ok", hold: 460 },
