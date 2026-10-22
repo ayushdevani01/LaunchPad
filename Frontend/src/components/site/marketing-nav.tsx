@@ -40,7 +40,7 @@ export function MarketingNav() {
       >
         <div
           className={cn(
-            "mx-auto flex max-w-[1180px] items-center justify-between px-5 transition-all duration-500 ease-smooth sm:px-8",
+            "mx-auto flex w-full items-center justify-between px-5 transition-all duration-500 ease-smooth sm:px-8",
             scrolled ? "h-14" : "h-[72px]",
           )}
         >

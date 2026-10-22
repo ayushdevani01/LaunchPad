@@ -22,7 +22,7 @@ export function AuthShell({
 }) {
   return (
     <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[1.05fr_1fr]">
-      {/* Narrative side — hidden on small screens so the form gets the full view. */}
+      {/* Narrative side: hidden on small screens so the form gets the full view. */}
       <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-white/[0.07] p-10 lg:flex">
         <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
           <div className="absolute inset-0 bg-blueprint opacity-40 [mask-image:radial-gradient(85%_70%_at_20%_10%,black,transparent_75%)]" />

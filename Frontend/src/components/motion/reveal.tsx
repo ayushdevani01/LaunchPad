@@ -41,7 +41,7 @@ export function Reveal({
   );
 }
 
-/** Word-level mask reveal — the headline rises out of its own baseline. */
+/** Word-level mask reveal: the headline rises out of its own baseline. */
 export function MaskedHeading({
   lines,
   className,
