@@ -95,6 +95,9 @@ test("source folders reject traversal, absolute paths and control characters", (
     "./apps",
     "apps\\web",
     "apps\nweb",
+    "apps//web",
+    "apps/",
+    "apps\x7fweb",
   ])
     assert.equal(form.validSourcePath(value), false);
 });
@@ -130,7 +133,7 @@ test("folder browsing sends an encoded branch/path and passes cancellation to fe
   const api = load("api.ts", {
     fetch: async (url, options) => {
       received = { url, options };
-      return { ok: true, status: 200, json: async () => ({ directories: [] }) };
+      return { ok: true, status: 200, json: async () => ({ path: 'apps/my app', directories: [] }) };
     },
   });
   await api.listDirectories(

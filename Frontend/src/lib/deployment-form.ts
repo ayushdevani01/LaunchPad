@@ -2,8 +2,9 @@ export function validSourcePath(path: string) {
   return (
     path.length <= 1000 &&
     !path.startsWith("/") &&
-    !/[\\\x00-\x1f]/.test(path) &&
-    !path.split("/").some((segment) => segment === "." || segment === "..")
+    !/[\\\x00-\x1f\x7f]/.test(path) &&
+    (path === "" ||
+      !path.split("/").some((segment) => !segment || segment === "." || segment === ".."))
   );
 }
 

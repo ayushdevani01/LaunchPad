@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { listDirectories, type DirectoryListing } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { validSourcePath } from "@/lib/deployment-form";
 
 export function FolderPicker({
   owner,
@@ -26,21 +27,23 @@ export function FolderPicker({
   onChange: (path: string) => void;
   id?: string;
 }) {
-  const [browse, setBrowse] = React.useState(value);
   const [manual, setManual] = React.useState(false);
   const [listing, setListing] = React.useState<DirectoryListing | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
+  const [attempt, setAttempt] = React.useState(0);
 
   const canBrowse = Boolean(owner && repo && branch);
+  const browse = value;
+  const validPath = validSourcePath(browse);
+  const currentListing = listing?.path === browse ? listing : null;
   const segments = browse ? browse.split("/") : [];
 
   React.useEffect(() => {
-    setBrowse(value);
-  }, [value]);
-
-  React.useEffect(() => {
-    if (!canBrowse || manual) return;
+    if (!canBrowse || manual || !validPath) {
+      setLoading(false);
+      return;
+    }
     const controller = new AbortController();
     setLoading(true);
     setError("");
@@ -61,7 +64,7 @@ export function FolderPicker({
       });
 
     return () => controller.abort();
-  }, [canBrowse, manual, owner, repo, branch, browse]);
+  }, [canBrowse, manual, owner, repo, branch, browse, validPath, attempt]);
 
   if (!canBrowse) {
     return (
@@ -76,17 +79,17 @@ export function FolderPicker({
     );
   }
 
-  const atSelection = value === browse;
-
   return (
     <div className="overflow-hidden rounded-lg border border-white/[0.09] bg-white/[0.02]">
       <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-2.5 py-1.5">
         <div className="flex min-w-0 items-center gap-1 font-mono text-[11px]">
           <button
             type="button"
-            onClick={() => setBrowse("")}
+            onClick={() => onChange("")}
+            aria-label="Select repository root"
+            title={repo}
             className={cn(
-              "shrink-0 rounded px-1 py-0.5 hover:bg-white/[0.06]",
+              "max-w-[50%] shrink-0 truncate rounded px-1 py-0.5 hover:bg-white/[0.06]",
               browse ? "text-faint" : "text-fg",
             )}
           >
@@ -99,7 +102,9 @@ export function FolderPicker({
                 <ChevronRight className="h-3 w-3 shrink-0 text-white/20" />
                 <button
                   type="button"
-                  onClick={() => setBrowse(path)}
+                  onClick={() => onChange(path)}
+                  aria-label={`Select folder ${path}`}
+                  title={path}
                   className={cn(
                     "truncate rounded px-1 py-0.5 hover:bg-white/[0.06]",
                     index === segments.length - 1 ? "text-fg" : "text-faint",
@@ -127,9 +132,8 @@ export function FolderPicker({
             id={id}
             aria-label="Source folder path"
             value={value}
-            onChange={(event) =>
-              onChange(event.target.value.replace(/^\/+|\/+$/g, ""))
-            }
+            onChange={(event) => onChange(event.target.value)}
+            onBlur={(event) => onChange(event.target.value.replace(/\/+$/g, ""))}
             placeholder="apps/web"
             autoFocus
             className="h-9 w-full rounded-md border border-white/[0.09] bg-black/30 px-2.5 font-mono text-[12px] text-fg placeholder:text-faint focus:border-white/25 focus:outline-none"
@@ -143,7 +147,8 @@ export function FolderPicker({
           {browse ? (
             <button
               type="button"
-              onClick={() => setBrowse(segments.slice(0, -1).join("/"))}
+              onClick={() => onChange(segments.slice(0, -1).join("/"))}
+              aria-label="Select parent folder"
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left font-mono text-[12px] text-faint hover:bg-white/[0.04]"
             >
               <CornerLeftUp className="h-3 w-3" />
@@ -151,7 +156,7 @@ export function FolderPicker({
             </button>
           ) : null}
 
-          {loading ? (
+          {loading && validPath ? (
             <div className="space-y-1.5 p-1">
               {[0, 1, 2].map((row) => (
                 <div
@@ -160,9 +165,20 @@ export function FolderPicker({
                 />
               ))}
             </div>
-          ) : error ? (
+          ) : error || !validPath ? (
             <div className="p-2.5">
-              <p className="text-[12px] text-warn">{error}</p>
+              <p role="alert" className="text-[12px] text-warn">
+                {error || "Enter a valid relative folder path."}
+              </p>
+              {validPath ? (
+                <button
+                  type="button"
+                  onClick={() => setAttempt((value) => value + 1)}
+                  className="mr-2 mt-2 rounded border border-white/[0.12] px-2 py-1 text-[11px] text-dim hover:text-fg"
+                >
+                  Try again
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setManual(true)}
@@ -171,16 +187,17 @@ export function FolderPicker({
                 Enter the path manually
               </button>
             </div>
-          ) : listing && listing.directories.length === 0 ? (
+          ) : currentListing && currentListing.directories.length === 0 ? (
             <p className="px-2.5 py-4 text-center font-mono text-[11px] text-faint">
               No subfolders here
             </p>
           ) : (
-            listing?.directories.map((directory) => (
+            currentListing?.directories.map((directory) => (
               <button
                 key={directory.path}
                 type="button"
-                onClick={() => setBrowse(directory.path)}
+                onClick={() => onChange(directory.path)}
+                aria-label={`Select folder ${directory.path}`}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left font-mono text-[12px] transition-colors",
                   directory.path === value
@@ -210,29 +227,24 @@ export function FolderPicker({
       )}
 
       {!manual ? (
-        <div className="flex items-center justify-between gap-3 border-t border-white/[0.07] px-2.5 py-2">
-          <span className="min-w-0 truncate font-mono text-[10.5px] text-faint">
-            {listing?.hasPackageJson
-              ? "package.json in this folder"
-              : "no package.json here"}
-          </span>
-          <button
-            type="button"
-            onClick={() => onChange(browse)}
-            disabled={atSelection || loading || !!error}
-            className={cn(
-              "shrink-0 rounded-md border px-2 py-1 font-mono text-[10px] uppercase tracking-[0.1em] transition-colors",
-              atSelection
-                ? "border-accent/25 bg-accent/[0.07] text-accent"
-                : "border-white/[0.14] text-fg hover:border-white/30 hover:bg-white/[0.05]",
-            )}
-          >
-            {atSelection
-              ? `using ${browse.split("/").pop() || "root"}`
-              : browse
-                ? `use ${browse.split("/").pop()}`
-                : "use root"}
-          </button>
+        <div className="space-y-1.5 border-t border-white/[0.07] px-2.5 py-2">
+          <p role="status" className="break-all font-mono text-[11px] text-accent">
+            Selected: {value || "repository root"}
+          </p>
+          <p className="font-mono text-[10.5px] text-faint">
+            {error || !validPath
+              ? "Folder contents unavailable"
+              : loading || !currentListing
+                ? "Reading folder contents..."
+                : currentListing.hasPackageJson
+                  ? "package.json in this folder"
+                  : "no package.json here"}
+          </p>
+          {currentListing?.truncated ? (
+            <p className="text-[11px] text-warn">
+              GitHub may have more entries in this folder. You can also type the path.
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>
