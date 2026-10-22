@@ -24,7 +24,7 @@ export function FrameworkStack() {
       aria-label="Supported frameworks"
       className="relative border-y border-white/[0.07]"
     >
-      <div className="mx-auto flex max-w-[1180px] flex-col gap-5 px-5 py-7 sm:px-8 md:flex-row md:items-center md:gap-10">
+      <div className="mx-auto flex w-full flex-col gap-5 px-5 py-7 sm:px-8 md:flex-row md:items-center md:gap-10">
         <p className="label-mono shrink-0 whitespace-nowrap md:w-[186px]">
           Frameworks supported
         </p>

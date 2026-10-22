@@ -138,7 +138,7 @@ function FailureVisual() {
   return (
     <div className="rounded-lg border border-danger/20 bg-danger/[0.05] p-3 font-mono text-[11px] leading-relaxed">
       <p className="text-danger">error: build exited with code 1</p>
-      <p className="mt-1 text-dim">src/app/page.tsx:42 — type mismatch</p>
+      <p className="mt-1 text-dim">src/app/page.tsx:42: type mismatch</p>
       <p className="mt-2 text-faint">logs archived · replay anytime</p>
     </div>
   );
@@ -287,7 +287,7 @@ function FeatureVisual({ index }: { index: number }) {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-blueprint opacity-[0.16] [mask-image:radial-gradient(70%_70%_at_50%_50%,black,transparent)]"
       />
-      <div className="relative mx-auto w-full max-w-[440px]">
+      <div className="relative w-full">
         <div className="mb-6 flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl border border-accent/20 bg-accent/[0.05] text-accent">
             <Icon size={18} strokeWidth={1.5} />
@@ -403,10 +403,10 @@ export function Platform() {
       aria-labelledby="platform-title"
       className="relative py-20 sm:py-28"
     >
-      <div className="mx-auto max-w-[1180px] px-5 sm:px-8">
+      <div className="mx-auto w-full px-5 sm:px-8">
         <div className="grid gap-6 border-b border-white/[0.07] pb-9 md:grid-cols-[1fr_0.9fr] md:items-end">
           <div>
-            <p className="label-mono">02 — Platform</p>
+            <p className="label-mono">02 / Platform</p>
             <h2
               id="platform-title"
               className="mt-4 max-w-[22ch] text-[clamp(1.85rem,3.4vw,2.6rem)] font-medium leading-[1.05] tracking-[-0.035em]"
@@ -416,8 +416,8 @@ export function Platform() {
             </h2>
           </div>
           <p className="max-w-[42ch] text-sm leading-relaxed text-dim md:justify-self-end">
-            The pieces you would otherwise glue together — cloning, building,
-            storage, TLS, cache invalidation — are one product here.
+            The pieces you would otherwise glue together, including cloning, building,
+            storage, TLS, and cache invalidation, are one product here.
           </p>
         </div>
 

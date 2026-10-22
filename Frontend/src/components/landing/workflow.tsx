@@ -107,10 +107,10 @@ const steps = [
 export function Workflow() {
   return (
     <section id="workflow" className="relative py-20 sm:py-28">
-      <div className="mx-auto max-w-[1180px] px-5 sm:px-8">
+      <div className="mx-auto w-full px-5 sm:px-8">
         <div className="grid gap-8 border-b border-white/[0.07] pb-10 md:grid-cols-[1fr_0.9fr] md:items-end">
           <Reveal>
-            <p className="label-mono">01 — Workflow</p>
+            <p className="label-mono">01 / Workflow</p>
             <h2 className="mt-4 max-w-[20ch] text-[clamp(1.85rem,3.4vw,2.6rem)] font-medium leading-[1.05] tracking-[-0.035em]">
               From clone to certificate in three moves.
             </h2>
