@@ -14,11 +14,11 @@ const included = [
 export function Pricing() {
   return (
     <section id="access" className="relative py-20 sm:py-28">
-      <div className="mx-auto max-w-[1180px] px-5 sm:px-8">
+      <div className="mx-auto w-full px-5 sm:px-8">
         <div className="overflow-hidden rounded-2xl border border-white/[0.08] bg-panel/60">
           <div className="grid md:grid-cols-[1fr_1fr]">
             <div className="relative border-b border-white/[0.07] p-7 sm:p-9 md:border-b-0 md:border-r">
-              <p className="label-mono">03 — Access</p>
+              <p className="label-mono">03 / Access</p>
               <h2 className="mt-4 max-w-[16ch] text-[clamp(1.8rem,3.2vw,2.4rem)] font-medium leading-[1.05] tracking-[-0.035em]">
                 Start with your GitHub account.
               </h2>

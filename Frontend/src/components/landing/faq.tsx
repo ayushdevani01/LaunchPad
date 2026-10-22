@@ -15,7 +15,7 @@ const items = [
   {
     question: "How does a monorepo work?",
     answer:
-      "After picking a repository and branch, the folder picker walks the tree. Choose apps/web and LaunchPad builds only that directory — install command, build command and output path are all resolved relative to it.",
+      "After picking a repository and branch, the folder picker walks the tree. Choose apps/web and LaunchPad builds only that directory. Install command, build command and output path are all resolved relative to it.",
   },
   {
     question: "Can I deploy a private repository?",
@@ -44,14 +44,14 @@ export function Faq() {
 
   return (
     <section id="faq" className="relative pb-20 pt-6 sm:pb-28 sm:pt-10">
-      <div className="mx-auto grid max-w-[1180px] gap-10 px-5 sm:px-8 md:grid-cols-[0.8fr_1.2fr]">
+      <div className="mx-auto grid w-full gap-10 px-5 sm:px-8 md:grid-cols-[0.8fr_1.2fr]">
         <Reveal>
-          <p className="label-mono">04 — Questions</p>
+          <p className="label-mono">04 / Questions</p>
           <h2 className="mt-4 max-w-[16ch] text-[clamp(1.85rem,3.4vw,2.6rem)] font-medium leading-[1.05] tracking-[-0.035em]">
             The things people ask before the first deploy.
           </h2>
           <p className="mt-4 max-w-[32ch] text-[13px] leading-relaxed text-faint">
-            Still stuck? Open an issue or reach out — the pipeline details are
+            Still stuck? Open an issue or reach out. The pipeline details are
             documented in the repository.
           </p>
         </Reveal>

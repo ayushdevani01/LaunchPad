@@ -6,7 +6,7 @@ import { buttonStyles } from "@/components/ui/button";
 export function Cta() {
   return (
     <section aria-labelledby="closing-title" className="border-t border-white/[0.07]">
-      <div className="mx-auto max-w-[1180px] px-5 py-14 sm:px-8 sm:py-20">
+      <div className="mx-auto w-full px-5 py-14 sm:px-8 sm:py-20">
         <Reveal y={10} className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-16">
           <div>
             <p className="text-sm leading-6 text-dim">Ready when you are</p>
