@@ -24,14 +24,14 @@ const mono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "LaunchPad — ship frontends from GitHub",
+    default: "LaunchPad | ship frontends from GitHub",
     template: "%s · LaunchPad",
   },
   description:
     "Connect a repository, pick a folder, and LaunchPad builds it, streams the logs, and serves it on your own subdomain.",
   metadataBase: new URL("https://launch-pad.dev"),
   openGraph: {
-    title: "LaunchPad — ship frontends from GitHub",
+    title: "LaunchPad | ship frontends from GitHub",
     description:
       "Deploy Next.js apps and static websites from GitHub. Live build logs, your own subdomain.",
     type: "website",

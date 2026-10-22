@@ -38,7 +38,7 @@ function DashboardBody() {
           <div className="flex items-center gap-2">
             <h1 className="text-[26px] font-medium leading-tight tracking-[-0.03em]">Projects</h1>
             <span className="rounded border border-white/[0.08] px-1.5 py-0.5 font-mono text-[10px] text-faint">
-              {loading ? "–" : projects.length}
+              {loading ? "-" : projects.length}
             </span>
           </div>
           <p className="mt-1 text-[13px] text-faint">

@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Boxes, LogOut, Menu, Plus } from "lucide-react";
+import { Boxes, House, LogOut, Menu, Plus } from "lucide-react";
 import { Logo } from "@/components/site/logo";
 import { Sheet } from "@/components/ui/sheet";
 import { buttonStyles } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/cn";
 
 const nav = [
   { href: "/dashboard", label: "Projects", icon: Boxes, match: "/dashboard" },
+  { href: "/", label: "Homepage", icon: House, match: "/" },
 ];
 
 function NavLink({
@@ -90,7 +91,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-ink lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
       <aside className="sticky top-0 hidden h-screen flex-col border-r border-white/[0.07] p-4 lg:flex">
         <div className="px-1.5">
-          <Logo href="/dashboard" showBeta={false} />
+          <Logo showBeta={false} />
         </div>
 
         <Link
@@ -126,7 +127,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className="flex min-w-0 flex-col">
         <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/[0.07] bg-ink/85 px-4 py-3 backdrop-blur-xl lg:hidden">
-          <Logo href="/dashboard" showBeta={false} />
+          <Logo showBeta={false} />
           <button
             type="button"
             onClick={() => setMenuOpen(true)}
@@ -137,7 +138,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </button>
         </header>
 
-        <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 py-7 sm:px-8 sm:py-10">
+        <main className="w-full flex-1 px-5 py-7 sm:px-8 sm:py-10 xl:px-12">
           {children}
         </main>
       </div>
