@@ -1,5 +1,5 @@
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000";
+  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:9000").trim().replace(/\/+$/, "");
 export const LOGS_URL =
   process.env.NEXT_PUBLIC_LOGS_URL || "http://localhost:9002";
 export const APP_DOMAIN =
@@ -26,6 +26,11 @@ export type Project = {
   createdAt: string;
   currentDeployment?: string | null;
   latestDeployment?: string | Deployment | null;
+  githubRepositoryId?: number;
+  githubInstallationId?: number;
+  githubSignInRequired?: boolean;
+  autoDeploy?: boolean;
+  watchPaths?: string[];
 };
 
 export type DeploymentStatus = "PENDING" | "BUILDING" | "SUCCESS" | "FAILED";
@@ -36,6 +41,8 @@ export type Deployment = {
   status: DeploymentStatus;
   createdAt: string;
   failureReason?: string;
+  commitHash?: string;
+  trigger?: "manual" | "push";
 };
 
 export type GitHubRepo = {
@@ -47,6 +54,7 @@ export type GitHubRepo = {
 };
 
 export type Detection = {
+  autoDeployAvailable?: boolean;
   framework: string;
   supported: "YES" | "PARTIAL" | "NO";
   notes?: string;
@@ -65,6 +73,8 @@ export type CreateProjectInput = {
   outputDir?: string;
   envVars?: Record<string, string>;
   deploymentTarget?: "auto" | "static" | "nextjs-lambda";
+  autoDeploy?: boolean;
+  watchPaths?: string[];
 };
 
 export class ApiError extends Error {
@@ -166,6 +176,21 @@ export const listRepos = async (signal?: AbortSignal) =>
     )
   ).repos ?? [];
 
+export const repositoryConnection = (signal?: AbortSignal) =>
+  request<{ repos: GitHubRepo[]; connectionRequired?: boolean; signInRequired?: boolean }>(
+    "/projects/github/repos", { signal }, "Could not load connected repositories",
+  );
+
+export const connectRepositories = (projectSlug?: string) =>
+  request<{ url: string }>("/github/install/start", {
+    method: "POST", body: JSON.stringify({ projectSlug }),
+  }, "Could not connect repositories");
+
+export const setAutomaticDeploys = (slug: string, autoDeploy: boolean) =>
+  request<{ autoDeploy: boolean }>(`/projects/${encodeURIComponent(slug)}/automation`, {
+    method: "PATCH", body: JSON.stringify({ autoDeploy }),
+  }, "Could not update automatic deployments");
+
 export const listBranches = async (
   owner: string,
   repo: string,
@@ -197,7 +222,7 @@ export const detectFramework = async (
 export type DirectoryEntry = {
   name: string;
   path: string;
-  hasPackageJson: boolean;
+  hasPackageJson?: boolean;
 };
 
 export type DirectoryListing = {
@@ -217,12 +242,16 @@ export const listDirectories = async (
   branch: string,
   path = "",
   signal?: AbortSignal,
-) =>
-  request<DirectoryListing>(
+) => {
+  const listing = await request<DirectoryListing>(
     `/projects/github/tree?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&branch=${encodeURIComponent(branch)}&path=${encodeURIComponent(path)}`,
     { signal },
     "Could not list folders",
   );
+  if (!Array.isArray(listing.directories) || typeof listing.path !== "string")
+    throw new ApiError("The API returned an incompatible folder listing. The backend needs updating.", 502);
+  return listing;
+};
 
 export const checkProjectName = async (name: string, signal?: AbortSignal) =>
   request<{ available: boolean }>(

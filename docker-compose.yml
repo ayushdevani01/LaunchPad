@@ -20,6 +20,36 @@ x-aws-environment: &aws-environment
   AWS_EC2_METADATA_DISABLED: "true"
 
 services:
+  kafka:
+    <<: *service
+    image: apache/kafka:4.1.0
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    volumes: [kafka-data:/var/lib/kafka/data]
+    # Internal Docker network only. Fargate does not connect to Kafka.
+    healthcheck:
+      test: [CMD-SHELL, '/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1']
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    mem_limit: 1g
+
   mongodb:
     <<: *service
     image: mongo:7
@@ -57,6 +87,7 @@ services:
 
   api-server:
     <<: *service
+    stop_grace_period: 30s
     build: ./api-server
     environment:
       <<: *aws-environment
@@ -77,6 +108,17 @@ services:
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
       GITHUB_CALLBACK_URL: ${GITHUB_CALLBACK_URL:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      GITHUB_APP_CALLBACK_URL: https://api.${BASE_DOMAIN}/auth/github-app/callback
+      GITHUB_APP_PRIVATE_KEY_PATH: /run/secrets/github-app.pem
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      WORKER_API_TOKEN: ${WORKER_API_TOKEN:?Set WORKER_API_TOKEN in .env}
+      KAFKA_BROKERS: kafka:9092
+    volumes:
+      - ./.secrets:/run/secrets:ro
     depends_on:
       mongodb: {condition: service_healthy}
       redis: {condition: service_healthy}
@@ -85,6 +127,31 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
+    mem_limit: 384m
+
+  deployment-worker:
+    <<: *service
+    stop_grace_period: 60s
+    build: ./api-server
+    command: [node, dist/worker.js]
+    environment:
+      <<: *aws-environment
+      MONGODB_URI: mongodb://launchpad:${MONGO_APP_PASSWORD}@mongodb:27017/launchpad?authSource=launchpad
+      KAFKA_BROKERS: kafka:9092
+      INTERNAL_API_URL: http://api-server:9000
+      WORKER_API_TOKEN: ${WORKER_API_TOKEN:?Set WORKER_API_TOKEN in .env}
+      AWS_ECS_CLUSTER: ${AWS_ECS_CLUSTER:?Set AWS_ECS_CLUSTER in .env}
+      AWS_ECS_TASK_DEFINITION: ${AWS_ECS_TASK_DEFINITION:?Set AWS_ECS_TASK_DEFINITION in .env}
+      AWS_ECS_SUBNETS: ${AWS_ECS_SUBNETS:?Set AWS_ECS_SUBNETS in .env}
+      AWS_ECS_SECURITY_GROUPS: ${AWS_ECS_SECURITY_GROUPS:?Set AWS_ECS_SECURITY_GROUPS in .env}
+      AWS_ECS_CONTAINER_NAME: build-server
+      BUILD_MAX_CONCURRENT: "2"
+      BUILD_REDIS_URL: ${BUILD_REDIS_URL:?Set BUILD_REDIS_URL in .env}
+      BUILD_CALLBACK_BASE_URL: https://api.${BASE_DOMAIN}
+      LAMBDA_PERMISSIONS_BOUNDARY_ARN: ${LAMBDA_PERMISSIONS_BOUNDARY_ARN:?Set the runtime boundary}
+    depends_on:
+      api-server: {condition: service_healthy}
+      kafka: {condition: service_healthy}
     mem_limit: 384m
 
   logs-service:
@@ -132,6 +199,7 @@ networks:
     name: launchpad-network
 
 volumes:
+  kafka-data:
   mongo-data:
   redis-data:
   caddy-data:

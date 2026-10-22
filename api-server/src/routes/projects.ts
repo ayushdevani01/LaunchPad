@@ -6,10 +6,11 @@ import { User } from '../models/User'
 import { Deployment } from '../models/Deployment'
 import { authMiddleware } from '../middleware/auth'
 import axios from 'axios'
-import { triggerBuildTask } from '../lib/build-task'
-import { githubAccessToken } from '../lib/github-token'
+import { enqueueDeployment } from '../lib/build-queue'
+import { appConfigured, repositoryAccess, repositoryFromURL, userRepositories, githubGet, pages, GitHubAccessError } from '../lib/github-app'
 import { publishResult } from '../lib/deployment-result'
 import mongoose from 'mongoose'
+import { githubSource, githubContentsUrl, GitHubSourceError } from '../lib/github-source'
 
 const router = Router()
 
@@ -41,14 +42,14 @@ const s3Client = new S3Client({
 // Framework Auto-Detector Helper
 async function detectFramework(owner: string, repo: string, pathStr: string, branch: string, token: string) {
     const headers = {
-        Authorization: `token ${token}`,
+        ...(token ? { Authorization: `token ${token}` } : {}),
         'User-Agent': 'LaunchPad-App',
         Accept: 'application/vnd.github.v3+json'
     }
 
     const getFileContent = async (filePath: string): Promise<string> => {
-        const url = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`
-        const { data } = await axios.get(url, { headers })
+        const url = githubContentsUrl(owner, repo, filePath)
+        const { data } = await axios.get(url, { headers, params: { ref: branch }, timeout: 15000 })
         
         if (data.encoding === 'base64' && data.content) {
             return Buffer.from(data.content, 'base64').toString('utf8')
@@ -242,57 +243,7 @@ router.post('/:slug/deployments/:deploymentId/status', async (req: Request, res:
 // GITHUB WEBHOOK RECEIVER ROUTE (Public)
 // =========================================================================
 router.post('/webhook/github', async (req: Request, res: Response) => {
-    const event = req.headers['x-github-event']
-    if (event !== 'push') {
-        return res.status(200).json({ message: 'Event ignored' })
-    }
-
-    const { repository, ref, commits } = req.body
-    if (!repository || !ref || !commits || commits.length === 0) {
-        return res.status(400).json({ error: 'Invalid webhook payload' })
-    }
-
-    // Get repository clone URL and branch
-    const gitUrl = repository.html_url
-    const branchName = ref.replace('refs/heads/', '')
-
-    try {
-        // Find all projects watching this repository and branch
-        const projects = await Project.find({
-            $or: [
-                { gitUrl: gitUrl },
-                { gitUrl: `${gitUrl}.git` },
-                { gitUrl: gitUrl.replace(/\.git$/, '') }
-            ],
-            branch: branchName
-        })
-        if (projects.length === 0) {
-            console.log(`[WEBHOOK] No projects found matching gitUrl: ${gitUrl}, branch: ${branchName}`)
-            return res.status(200).json({ message: 'No matching projects found' })
-        }
-
-        for (const project of projects) {
-            console.log(`[WEBHOOK] Triggering automated deployment for project: ${project.slug}`)
-
-            // Get the user's github token to clone private repos if necessary
-            const user = await User.findById(project.userId)
-            const githubToken = await githubAccessToken(user)
-
-            // Create a new deployment
-            const deployment = await Deployment.create({
-                projectId: project._id,
-                status: 'BUILDING'
-            })
-
-            // Trigger the build task run
-            await triggerBuildTask(project, deployment, githubToken)
-        }
-
-        return res.status(200).json({ success: true, message: `Deployments triggered for ${projects.length} project(s)` })
-    } catch (error) {
-        console.error('[WEBHOOK] Failed to process webhook:', error)
-        return res.status(500).json({ error: 'Internal server error' })
-    }
+    return res.status(410).json({ error: 'Use the signed GitHub App webhook at /webhooks/github.' })
 })
 
 // =========================================================================
@@ -304,18 +255,9 @@ router.get('/github/repos', async (req: Request, res: Response) => {
     const userId = res.locals.authUser.userId
     try {
         const user = await User.findById(userId)
-        const githubToken = await githubAccessToken(user)
-        if (!githubToken) {
-            return res.status(400).json({ error: 'GitHub account not linked. Please login via GitHub.' })
-        }
-
-        const { data } = await axios.get('https://api.github.com/user/repos?per_page=100&sort=updated', {
-            headers: {
-                Authorization: `token ${githubToken}`,
-                'User-Agent': 'LaunchPad-App'
-            }
-        })
-
+        if (!appConfigured()) return res.status(503).json({ error: 'The LaunchPad GitHub App setup is incomplete. Repository access is unavailable until it is configured.' })
+        if (user?.githubTokenKind !== 'app') return res.json({ repos: [], connectionRequired: true, signInRequired: true })
+        const data = await userRepositories(user)
         const repos = data.map((repo: any) => ({
             name: repo.name,
             fullName: repo.full_name,
@@ -324,139 +266,97 @@ router.get('/github/repos', async (req: Request, res: Response) => {
             defaultBranch: repo.default_branch
         }))
 
-        return res.json({ repos })
+        return res.json({ repos, connectionRequired: repos.length === 0 })
     } catch (err: any) {
-        console.error('Failed to fetch github repos:', err.response?.data || err.message)
-        return res.status(500).json({ error: 'Failed to fetch repositories' })
+        return res.status(err.status || 502).json({ error: err.message || 'Could not load connected repositories' })
     }
 })
 
 router.get('/github/branches', async (req: Request, res: Response) => {
-    const { owner, repo } = req.query
     const userId = res.locals.authUser.userId
-
-    if (!owner || !repo) {
-        return res.status(400).json({ error: 'owner and repo are required' })
-    }
-
     try {
-        const user = await User.findById(userId)
-        const githubToken = await githubAccessToken(user)
-        if (!githubToken) {
-            return res.status(400).json({ error: 'GitHub account not linked.' })
-        }
-
-        const { data } = await axios.get(`https://api.github.com/repos/${owner}/${repo}/branches`, {
-            headers: {
-                Authorization: `token ${githubToken}`,
-                'User-Agent': 'LaunchPad-App'
-            }
-        })
-
+        const { owner, repo } = githubSource(req.query)
+        const { token } = await repositoryAccess(await User.findById(userId), owner, repo)
+        const data = await pages(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`, token)
         const branches = data.map((b: any) => b.name)
         return res.json({ branches })
     } catch (err: any) {
-        console.error('Failed to fetch branches:', err.response?.data || err.message)
-        return res.status(500).json({ error: 'Failed to fetch branches' })
+        return res.status(err instanceof GitHubSourceError ? 400 : err.status || 502).json({ error: err.message || 'Could not load branches' })
     }
 })
 
 // Lists the folders directly below a path so the dashboard can offer a folder
 // picker instead of asking people to type a monorepo path from memory.
 router.get('/github/tree', async (req: Request, res: Response) => {
-    const { owner, repo, branch = 'main', path = '' } = req.query
     const userId = res.locals.authUser.userId
 
-    if (!owner || !repo) {
-        return res.status(400).json({ error: 'owner and repo are required' })
-    }
-
     try {
-        const user = await User.findById(userId)
-        const githubToken = await githubAccessToken(user)
-        if (!githubToken) {
-            return res.status(400).json({ error: 'GitHub account not linked.' })
-        }
+        const { owner, repo, branch, path } = githubSource(req.query)
+        const { token: githubToken } = await repositoryAccess(await User.findById(userId), owner, repo)
 
-        const normalizedPath = String(path).replace(/^\/+|\/+$/g, '')
         const { data } = await axios.get(
-            `https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(String(branch))}?recursive=1`,
+            githubContentsUrl(owner, repo, path),
             {
+                params: { ref: branch },
+                timeout: 15000,
                 headers: {
-                    Authorization: `token ${githubToken}`,
+                    ...(githubToken ? { Authorization: `token ${githubToken}` } : {}),
                     'User-Agent': 'LaunchPad-App',
                     Accept: 'application/vnd.github.v3+json'
                 }
             }
         )
 
-        const tree: any[] = Array.isArray(data.tree) ? data.tree : []
-        const prefix = normalizedPath ? `${normalizedPath}/` : ''
-        const directoryNames = new Set<string>()
-        const relativeFiles = new Set<string>()
-
-        for (const entry of tree) {
-            if (!entry || typeof entry.path !== 'string') continue
-            if (!entry.path.startsWith(prefix)) continue
-
-            const relative = entry.path.slice(prefix.length)
-            if (!relative) continue
-
-            const [first] = relative.split('/')
-            if (entry.type === 'tree') directoryNames.add(first)
-            if (entry.type === 'blob') relativeFiles.add(relative)
+        if (!Array.isArray(data)) {
+            return res.status(400).json({ error: 'Choose a folder, not a file.' })
         }
 
-        const directories = Array.from(directoryNames)
-            .sort((a, b) => a.localeCompare(b))
-            .slice(0, 100)
-            .map((name) => ({
-                name,
-                path: prefix ? `${normalizedPath}/${name}` : name,
-                hasPackageJson: relativeFiles.has(`${name}/package.json`)
-            }))
+        const directories = data
+            .filter(entry => entry?.type === 'dir' && typeof entry.name === 'string' && typeof entry.path === 'string')
+            .map(entry => ({ name: entry.name, path: entry.path }))
+            .sort((a, b) => a.name.localeCompare(b.name))
 
         return res.json({
-            path: normalizedPath,
+            path,
             directories,
-            hasPackageJson: relativeFiles.has('package.json'),
-            truncated: Boolean(data.truncated)
+            hasPackageJson: data.some(entry => entry?.type === 'file' && entry.name === 'package.json'),
+            // GitHub's Contents API caps each directory at 1,000 entries.
+            truncated: data.length >= 1000
         })
     } catch (err: any) {
+        if (err instanceof GitHubSourceError) return res.status(400).json({ error: err.message })
+        if (err instanceof GitHubAccessError) return res.status(err.status).json({ error: err.message })
         const status = err.response?.status
-        console.error('Failed to list repository tree:', err.response?.data || err.message)
+        console.error('Failed to list repository folders:', status || err.code || 'unknown')
         if (status === 404 || status === 409) {
             return res.status(404).json({ error: 'That branch or folder could not be found.' })
+        }
+        if (status === 403 || status === 429) {
+            return res.status(status).json({ error: 'GitHub denied access or its request limit was reached. Check repository access and try again.' })
         }
         return res.status(500).json({ error: 'Failed to list repository folders' })
     }
 })
 
 router.get('/github/detect', async (req: Request, res: Response) => {
-    const { owner, repo, path = '', branch = 'main' } = req.query
     const userId = res.locals.authUser.userId
 
-    if (!owner || !repo) {
-        return res.status(400).json({ error: 'owner and repo are required' })
-    }
-
     try {
-        const user = await User.findById(userId)
-        const githubToken = await githubAccessToken(user)
-        if (!githubToken) {
-            return res.status(400).json({ error: 'GitHub account not linked.' })
-        }
+        const { owner, repo, path, branch } = githubSource(req.query)
+        const access = await repositoryAccess(await User.findById(userId), owner, repo)
 
         const result = await detectFramework(
-            owner as string,
-            repo as string,
-            path as string,
-            branch as string,
-            githubToken
+            owner,
+            repo,
+            path,
+            branch,
+            access.token
         )
 
-        return res.json({ detection: result })
+        return res.json({ detection: { ...result, autoDeployAvailable: !!access.installationId } })
     } catch (err: any) {
+        if (err instanceof GitHubSourceError) return res.status(400).json({ error: err.message })
+        if (err instanceof GitHubAccessError) return res.status(err.status).json({ error: err.message })
         console.error('Failed to detect framework:', err.response?.data || err.message)
         return res.status(500).json({ error: 'Failed to analyze repository contents' })
     }
@@ -488,119 +388,31 @@ router.get('/check-name', async (req: Request, res: Response) => {
 })
 
 router.post('/', async (req: Request, res: Response) => {
-    const { 
-        gitURL, 
-        project_name, 
-        sourceDir,
-        buildCommand,
-        installCommand,
-        outputDir,
-        branch,
-        envVars
-    } = req.body
-    const userId = res.locals.authUser.userId
-
-    if (!gitURL) {
-        return res.status(400).json({ error: 'gitURL is required' })
-    }
-
-    const githubRegex = /^https?:\/\/(www\.)?github\.com\/[\w.-]+\/[\w.-]+/i
-    if (!githubRegex.test(gitURL)) {
-        return res.status(400).json({ error: 'Only GitHub repository URLs are supported' })
-    }
-
-    const normalizedSourceDir = sourceDir?.trim().replace(/^\/+|\/+$/g, '') || ''
-    const projectSlug = project_name?.trim() || generateSlug()
-    if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(projectSlug)) return res.status(400).json({ error: 'Invalid project name' })
-    const deploymentTarget = req.body.deploymentTarget || 'auto'
-    if (!['auto', 'static', 'nextjs-lambda'].includes(deploymentTarget)) return res.status(400).json({ error: 'Invalid deployment target' })
-
     try {
-        const existing = await Project.findOne({ slug: projectSlug })
-        if (existing) {
-            return res.status(400).json({ error: 'Project name already taken' })
-        }
-
-        const user = await User.findById(userId)
-        const githubToken = await githubAccessToken(user)
-
-        const project = await Project.create({
-            slug: projectSlug,
-            gitUrl: gitURL,
-            sourceDir: normalizedSourceDir || undefined,
-            userId: userId,
-            buildCommand: buildCommand?.trim() || undefined,
-            installCommand: installCommand?.trim() || undefined,
-            outputDir: outputDir?.trim() || undefined,
-            branch: branch?.trim() || 'main',
-            envVars,
-            deploymentTarget
-        })
-
-        const deployment = await Deployment.create({
-            projectId: project._id,
-            status: 'BUILDING'
-        })
-
-        // Register Webhook on GitHub Repository automatically using the OAuth Token
-        if (githubToken) {
-            const gitMatch = gitURL.match(/github\.com\/([^/]+)\/([^/.]+)/i)
-            if (gitMatch) {
-                const owner = gitMatch[1]
-                const repo = gitMatch[2]
-
-                // Construct public webhook URL
-                const protocol = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http')
-                const host = req.get('host')
-                const webhookUrl = `${protocol}://${host}/projects/webhook/github`
-
-                console.log(`[WEBHOOK REGISTRATION] Registering webhook for ${owner}/${repo} pointing to ${webhookUrl}`)
-                try {
-                    const response = await axios.post(`https://api.github.com/repos/${owner}/${repo}/hooks`, {
-                        name: 'web',
-                        active: true,
-                        events: ['push'],
-                        config: {
-                            url: webhookUrl,
-                            content_type: 'json',
-                            insecure_ssl: '0'
-                        }
-                    }, {
-                        headers: {
-                            'Authorization': `Bearer ${githubToken}`,
-                            'Accept': 'application/vnd.github+json',
-                            'X-GitHub-Api-Version': '2022-11-28'
-                        }
-                    })
-                    console.log(`[WEBHOOK REGISTRATION] GitHub Webhook registered successfully. ID: ${response.data.id}`)
-                } catch (webhookError: any) {
-                    if (webhookError.response && webhookError.response.status === 422) {
-                        console.log(`[WEBHOOK REGISTRATION] Webhook already exists for ${owner}/${repo}`)
-                    } else {
-                        console.error(`[WEBHOOK REGISTRATION] Failed to register webhook:`, webhookError.response?.data || webhookError.message)
-                    }
-                }
-            }
-        }
-
-        // Trigger build container/task
-        const executionName = await triggerBuildTask(project, deployment, githubToken)
-
-        console.log(`Build started for project: ${projectSlug}, deployment: ${deployment._id}`)
-
-        return res.json({
-            data: {
-                projectSlug,
-                url: `https://${projectSlug}.launch-pad.dev`,
-                executionName,
-                project,
-                deployment
-            }
-        })
-
-    } catch (error) {
-        console.error('Failed to create project:', error)
-        return res.status(500).json({ error: 'Failed to start build' })
+        const { gitURL, project_name, buildCommand, installCommand, outputDir, envVars } = req.body
+        const source = repositoryFromURL(gitURL)
+        const { path: sourceDir, branch } = githubSource({ ...source, path: req.body.sourceDir || '', branch: req.body.branch || 'main' })
+        const projectSlug = typeof project_name === 'string' ? project_name.trim() : generateSlug()
+        if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(projectSlug)) return res.status(400).json({ error: 'Invalid project name' })
+        const deploymentTarget = req.body.deploymentTarget || 'auto'
+        if (!['auto', 'static', 'nextjs-lambda'].includes(deploymentTarget)) return res.status(400).json({ error: 'Invalid deployment target' })
+        const watchPaths = req.body.watchPaths || []
+        if (!Array.isArray(watchPaths) || watchPaths.length > 50) return res.status(400).json({ error: 'Use at most 50 additional watch paths' })
+        for (const path of watchPaths) githubSource({ ...source, path })
+        if (await Project.exists({ slug: projectSlug })) return res.status(409).json({ error: 'Project name already taken' })
+        const userId = res.locals.authUser.userId
+        const access = await repositoryAccess(await User.findById(userId), source.owner, source.repo)
+        const head = await githubGet(`/repos/${source.owner}/${source.repo}/commits/${encodeURIComponent(branch)}`, access.token)
+        const project = await Project.create({ slug: projectSlug, gitUrl: access.repo.clone_url, sourceDir, userId, branch,
+            githubRepositoryId: access.repo.id, githubInstallationId: access.installationId,
+            buildCommand: typeof buildCommand === 'string' ? buildCommand.trim() : undefined,
+            installCommand: typeof installCommand === 'string' ? installCommand.trim() : undefined,
+            outputDir: typeof outputDir === 'string' ? outputDir.trim() : undefined,
+            envVars, deploymentTarget, watchPaths, autoDeploy: !!access.installationId && req.body.autoDeploy !== false })
+        const deployment = await enqueueDeployment(project, head.sha)
+        return res.status(202).json({ data: { projectSlug, url: `https://${projectSlug}.${process.env.BASE_DOMAIN || 'launch-pad.dev'}`, project, deployment } })
+    } catch (err: any) {
+        return res.status(err instanceof GitHubSourceError ? 400 : err.status || 500).json({ error: err.status || err instanceof GitHubSourceError ? err.message : 'Could not queue deployment' })
     }
 })
 
@@ -625,7 +437,8 @@ router.get('/:slug', async (req: Request, res: Response) => {
         if (!project) {
             return res.status(404).json({ error: 'Project not found' })
         }
-        return res.json({ project })
+        const user = await User.findById(userId).select('githubTokenKind')
+        return res.json({ project: { ...project.toObject(), githubSignInRequired: user?.githubTokenKind !== 'app' } })
     } catch (error) {
         console.error('Failed to fetch project:', error)
         return res.status(500).json({ error: 'Failed to fetch project' })
@@ -683,6 +496,18 @@ router.get('/:slug/deployments/:deploymentId/logs', async (req: Request, res: Re
     }
 })
 
+router.patch('/:slug/automation', async (req: Request, res: Response) => {
+    try {
+        const project = await Project.findOne({ slug: req.params.slug, userId: res.locals.authUser.userId })
+        if (!project) return res.sendStatus(404)
+        if (typeof req.body.autoDeploy !== 'boolean') return res.status(400).json({ error: 'autoDeploy must be a boolean' })
+        if (req.body.autoDeploy && !project.githubInstallationId) return res.status(409).json({ error: 'Connect this repository before enabling automatic deployments.' })
+        project.autoDeploy = req.body.autoDeploy
+        await project.save()
+        return res.json({ autoDeploy: project.autoDeploy })
+    } catch { return res.status(500).json({ error: 'Could not update automatic deployments' }) }
+})
+
 router.post('/:slug/redeploy', async (req: Request, res: Response) => {
     const { slug } = req.params
     const userId = res.locals.authUser.userId
@@ -693,26 +518,21 @@ router.post('/:slug/redeploy', async (req: Request, res: Response) => {
             return res.status(404).json({ error: 'Project not found' })
         }
 
-        const user = await User.findById(userId)
-        const githubToken = await githubAccessToken(user)
-
-        const deployment = await Deployment.create({
-            projectId: project._id,
-            status: 'BUILDING'
-        })
-
-        const executionName = await triggerBuildTask(project, deployment, githubToken)
-
-        console.log(`[MANUAL REDEPLOY] Project ${slug} manual redeployment started. ID: ${deployment._id}`)
-
-        return res.json({
-            success: true,
-            deployment,
-            executionName
-        })
-    } catch (error) {
-        console.error('[MANUAL REDEPLOY] Failed to trigger manual redeployment:', error)
-        return res.status(500).json({ error: 'Failed to start redeployment' })
+        const source = repositoryFromURL(project.gitUrl)
+        const access = await repositoryAccess(await User.findById(userId), source.owner, source.repo)
+        if (project.githubRepositoryId && project.githubRepositoryId !== access.repo.id) {
+            return res.status(403).json({ error: 'Connect this project repository to the LaunchPad GitHub App first.' })
+        }
+        project.githubRepositoryId = access.repo.id
+        project.githubInstallationId = access.installationId
+        project.gitUrl = access.repo.clone_url
+        if (!access.installationId) project.autoDeploy = false
+        await project.save()
+        const head = await githubGet(`/repos/${source.owner}/${source.repo}/commits/${encodeURIComponent(project.branch || 'main')}`, access.token)
+        const deployment = await enqueueDeployment(project, head.sha)
+        return res.status(202).json({ success: true, deployment })
+    } catch (err: any) {
+        return res.status(err.status || 500).json({ error: err.status ? err.message : 'Could not queue redeployment' })
     }
 })
 
