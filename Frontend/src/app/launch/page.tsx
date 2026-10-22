@@ -21,6 +21,7 @@ import {
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { AppShell } from "@/components/app/app-shell";
 import { FolderPicker } from "@/components/app/folder-picker";
+import { GitHubButton } from "@/components/auth/github-button";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Select, type SelectOption } from "@/components/ui/select";
 import { Field, Input, SuffixInput } from "@/components/ui/field";
@@ -32,7 +33,8 @@ import {
   createProject,
   detectFramework,
   listBranches,
-  listRepos,
+  repositoryConnection,
+  connectRepositories,
   projectUrl,
   type Detection,
   type GitHubRepo,
@@ -264,6 +266,10 @@ function LaunchBody() {
   const [repos, setRepos] = React.useState<GitHubRepo[]>([]);
   const [reposLoading, setReposLoading] = React.useState(true);
   const [reposError, setReposError] = React.useState("");
+  const [signInRequired, setSignInRequired] = React.useState(false);
+  const [connecting, setConnecting] = React.useState(false);
+  const [autoDeploy, setAutoDeploy] = React.useState(true);
+  const [watchPaths, setWatchPaths] = React.useState("");
   const [repoFullName, setRepoFullName] = React.useState("");
   const [manualUrl, setManualUrl] = React.useState("");
   const [branch, setBranch] = React.useState("");
@@ -329,9 +335,12 @@ function LaunchBody() {
 
   React.useEffect(() => {
     const controller = new AbortController();
-    listRepos(controller.signal)
+    repositoryConnection(controller.signal)
       .then((data) => {
-        if (!controller.signal.aborted) setRepos(data);
+        if (!controller.signal.aborted) {
+          setRepos(data.repos);
+          setSignInRequired(data.signInRequired === true);
+        }
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
@@ -348,6 +357,23 @@ function LaunchBody() {
       controller.abort();
     };
   }, []);
+
+  React.useEffect(() => {
+    const error = new URLSearchParams(window.location.search).get("githubError");
+    if (error) setReposError(error);
+  }, []);
+
+  const connect = async () => {
+    setConnecting(true);
+    setReposError("");
+    try {
+      const { url } = await connectRepositories();
+      window.location.assign(url);
+    } catch (cause) {
+      setReposError(cause instanceof Error ? cause.message : "Could not connect repositories");
+      setConnecting(false);
+    }
+  };
 
   // A new repository resets everything that was derived from the previous one.
   React.useEffect(() => {
@@ -396,14 +422,15 @@ function LaunchBody() {
 
   // Framework detection follows repository + branch + folder.
   React.useEffect(() => {
-    if (!repoRef || !branch.trim() || !validSourcePath(sourceDir)) return;
-    const controller = new AbortController();
-    setDetecting(true);
+    setDetecting(false);
     setDetectError("");
     setDetection(null);
     setInstallCommand("");
     setBuildCommand("");
     setOutputDir("");
+    if (!repoRef || !branch.trim() || !validSourcePath(sourceDir)) return;
+    const controller = new AbortController();
+    setDetecting(true);
 
     const timer = window.setTimeout(() => {
       detectFramework(
@@ -502,7 +529,12 @@ function LaunchBody() {
     sourceValid && nameValid && !detecting && !unsupported && !envError;
 
   const setDir = (value: string) => {
-    setSourceDir(value.replace(/^\/+|\/+$/g, ""));
+    setSourceDir(value);
+  };
+
+  const selectBranch = (value: string) => {
+    setBranch(value);
+    setSourceDir("");
   };
 
   const reset = () => {
@@ -547,6 +579,8 @@ function LaunchBody() {
         buildCommand: buildCommand.trim() || undefined,
         outputDir: outputDir.trim() || undefined,
         envVars: Object.keys(env).length > 0 ? env : undefined,
+        autoDeploy: autoDeploy && detection?.autoDeployAvailable !== false,
+        watchPaths: watchPaths.split(",").map(path => path.trim()).filter(Boolean),
       });
       const data = response as {
         data?: { projectSlug?: string; url?: string };
@@ -586,7 +620,7 @@ function LaunchBody() {
 
   if (result) {
     return (
-      <div className="mx-auto max-w-[560px] py-6">
+      <div className="w-full py-6">
         <div className="overflow-hidden rounded-xl border border-white/[0.09] bg-panel">
           <div className="border-b border-white/[0.07] px-6 py-8 text-center">
             <span className="mx-auto grid h-11 w-11 place-items-center rounded-full border border-accent/30 bg-accent/[0.08]">
@@ -635,7 +669,7 @@ function LaunchBody() {
   }
 
   return (
-    <div className="mx-auto max-w-[760px]">
+    <div className="w-full">
       <Link
         href="/dashboard"
         className="inline-flex items-center gap-1.5 text-[12px] text-faint transition-colors hover:text-fg"
@@ -691,6 +725,19 @@ function LaunchBody() {
                 ]}
               />
 
+              <div className="flex flex-col gap-3 rounded-lg border border-white/[0.09] p-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-[12px] leading-5 text-dim">
+                  Sign-in reads your identity and email. Connect only the repositories you want LaunchPad to deploy.
+                </p>
+                {signInRequired ? (
+                  <GitHubButton label="Sign in with the GitHub App" />
+                ) : (
+                  <Button variant="secondary" size="sm" loading={connecting} onClick={() => void connect()}>
+                    Connect repositories
+                  </Button>
+                )}
+              </div>
+
               {mode === "mine" ? (
                 <Field
                   label="Repository"
@@ -698,7 +745,7 @@ function LaunchBody() {
                   hint={
                     reposError
                       ? undefined
-                      : "Only repositories your GitHub account can read are listed."
+                      : "Only repositories selected in your LaunchPad GitHub App installation are listed."
                   }
                   error={reposError || undefined}
                 >
@@ -725,7 +772,7 @@ function LaunchBody() {
                 <Field
                   label="Repository URL"
                   htmlFor="repository-url"
-                  hint="Public repositories work without extra GitHub scopes."
+                  hint="Public repositories can be deployed manually. Connect a repository you own to enable automatic deployments."
                   error={urlError || undefined}
                 >
                   <Input
@@ -750,7 +797,7 @@ function LaunchBody() {
                       id="branch"
                       value={branch || null}
                       options={branchOptions}
-                      onValueChange={setBranch}
+                      onValueChange={selectBranch}
                       placeholder="Select a branch"
                       searchPlaceholder="Filter branches…"
                       searchable
@@ -760,7 +807,7 @@ function LaunchBody() {
                     <Input
                       id="branch"
                       value={branch}
-                      onChange={(event) => setBranch(event.target.value)}
+                      onChange={(event) => selectBranch(event.target.value)}
                       placeholder="main"
                       disabled={!repoRef}
                       className="font-mono text-[12.5px]"
@@ -769,15 +816,16 @@ function LaunchBody() {
                 </Field>
 
                 <div className="space-y-2">
-                  <div className="flex items-baseline justify-between">
-                    <span className="text-[13px] font-medium text-fg/90">
+                  <div className="flex min-w-0 items-baseline justify-between gap-3">
+                    <span className="shrink-0 text-[13px] font-medium text-fg/90">
                       Folder
                     </span>
-                    <span className="font-mono text-[10px] text-faint">
+                    <span title={sourceDir || "repository root"} className="truncate font-mono text-[10px] text-faint">
                       {sourceDir ? sourceDir : "repository root"}
                     </span>
                   </div>
                   <FolderPicker
+                    key={`${repoRef?.fullName ?? ""}:${branch}`}
                     id="source-dir"
                     owner={repoRef?.owner}
                     repo={repoRef?.repo}
@@ -890,11 +938,21 @@ function LaunchBody() {
                 >
                   <option value="auto">Automatic</option>
                   <option value="nextjs-lambda">
-                    Next.js — server rendering and API routes
+                    Next.js: server rendering and API routes
                   </option>
                   <option value="static">Static website / static export</option>
                 </select>
               </Field>
+
+              <label className="flex items-start gap-3 rounded-lg border border-white/[0.09] p-4 text-[13px] text-dim">
+                <input type="checkbox" checked={autoDeploy && detection?.autoDeployAvailable !== false} disabled={detection?.autoDeployAvailable === false} onChange={event => setAutoDeploy(event.target.checked)} className="mt-0.5 accent-accent" />
+                <span>Deploy pushes to this branch automatically.<span className="mt-1 block text-[12px] text-faint">Changes in this folder, shared packages and root lockfiles trigger a build. Failed builds keep the last working site live.</span></span>
+              </label>
+              {autoDeploy && detection?.autoDeployAvailable !== false ? (
+                <Field label="Additional watched paths" htmlFor="watch-paths" hint="Optional repository paths, separated by commas. Shared packages and root lockfiles are already included.">
+                  <Input id="watch-paths" value={watchPaths} onChange={event => setWatchPaths(event.target.value)} placeholder="shared, config/site.json" />
+                </Field>
+              ) : null}
               {unsupported ? (
                 <p role="alert" className="text-[12px] text-warn">
                   This framework needs a static export. Choose the static target
@@ -908,7 +966,7 @@ function LaunchBody() {
                     <p className="mt-0.5 text-[11px] text-faint">
                       {detection && detection.supported !== "NO"
                         ? "Filled from the detected framework."
-                        : "No framework detected — set these yourself."}
+                        : "No framework detected. Set these yourself."}
                     </p>
                   </div>
                   {detection && detection.supported !== "NO" ? (
@@ -1129,7 +1187,7 @@ function LaunchBody() {
 
               <p className="text-[12px] leading-relaxed text-faint">
                 Deploying creates a build task immediately. The previous
-                deployment keeps serving until this one succeeds — nothing is
+                deployment keeps serving until this one succeeds. Nothing is
                 overwritten on a failure.
               </p>
 

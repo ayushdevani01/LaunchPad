@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { AppShell } from "@/components/app/app-shell";
+import { GitHubButton } from "@/components/auth/github-button";
 import { LogStream } from "@/components/app/log-stream";
 import { StatusBadge } from "@/components/ui/badge";
 import { Button, buttonStyles } from "@/components/ui/button";
@@ -26,6 +27,8 @@ import {
   redeploy as triggerRedeploy,
   repoPath,
   APP_DOMAIN,
+  connectRepositories,
+  setAutomaticDeploys,
   type Deployment,
   type Project,
 } from "@/lib/api";
@@ -43,6 +46,7 @@ function ProjectBody() {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState("");
+  const [connectionError, setConnectionError] = React.useState("");
 
   const [logs, setLogs] = React.useState("");
   const [logsLoading, setLogsLoading] = React.useState(false);
@@ -50,6 +54,8 @@ function ProjectBody() {
   const [logsRetry, setLogsRetry] = React.useState(0);
   const [redeploying, setRedeploying] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
+  const [connecting, setConnecting] = React.useState(false);
+  const [updatingAutomation, setUpdatingAutomation] = React.useState(false);
   const redeployLock = React.useRef(false);
   const loadSequence = React.useRef(0);
 
@@ -91,20 +97,32 @@ function ProjectBody() {
     return () => controller.abort();
   }, [load]);
 
+  React.useEffect(() => {
+    setConnectionError(new URLSearchParams(window.location.search).get("githubError") || "");
+  }, []);
+
   const selected = deployments.find((item) => item._id === selectedId) ?? null;
   const live = selected ? ACTIVE.has(selected.status) : false;
   const active = deployments.some((item) => ACTIVE.has(item.status));
   const deploymentId = selected?._id;
 
-  // Keep the deployment list fresh while a build is in flight.
+  // Push builds can arrive while the page is idle. Poll slowly between builds
+  // and refresh when the user returns, without overlapping requests.
   React.useEffect(() => {
-    if (!active) return;
     const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      if (!document.hidden) void load(controller.signal);
-    }, 5000);
+    let refreshing = false;
+    const refresh = () => {
+      if (document.hidden || refreshing || controller.signal.aborted) return;
+      refreshing = true;
+      void load(controller.signal).finally(() => { refreshing = false; });
+    };
+    const timer = window.setInterval(refresh, active ? 5000 : 15000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
     return () => {
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
       controller.abort();
     };
   }, [active, load]);
@@ -300,12 +318,37 @@ function ProjectBody() {
         </div>
       </div>
 
-      {error ? (
+      {!project.githubInstallationId ? (
+        <div className="mt-5 flex flex-col gap-3 rounded-lg border border-accent/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[12px] leading-5 text-dim">Connect this repository to enable builds and push deployments with access limited to your selected repositories.</p>
+          {project.githubSignInRequired ? <GitHubButton label="Update GitHub connection" /> : <Button variant="secondary" size="sm" loading={connecting} onClick={() => {
+            setConnecting(true);
+            void connectRepositories(project.slug).then(({ url }) => window.location.assign(url)).catch(cause => {
+              setError(cause instanceof Error ? cause.message : "Could not connect repository");
+              setConnecting(false);
+            });
+          }}>Connect repository</Button>}
+        </div>
+      ) : null}
+
+      {project.githubInstallationId ? (
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/[0.09] p-4">
+          <p className="text-[12px] text-dim">Automatic deployments: {project.autoDeploy ? `on for ${project.branch || "main"}` : "paused"}</p>
+          <Button variant="secondary" size="sm" loading={updatingAutomation} onClick={() => {
+            setUpdatingAutomation(true);
+            void setAutomaticDeploys(project.slug, !project.autoDeploy).then(({ autoDeploy }) => setProject(current => current ? { ...current, autoDeploy } : current)).catch(cause => {
+              setError(cause instanceof Error ? cause.message : "Could not update automatic deployments");
+            }).finally(() => setUpdatingAutomation(false));
+          }}>{project.autoDeploy ? "Pause automatic deploys" : "Enable automatic deploys"}</Button>
+        </div>
+      ) : null}
+
+      {error || connectionError ? (
         <p
           role="alert"
           className="mt-5 rounded-lg border border-danger/25 bg-danger/[0.05] p-3 text-[13px] text-danger"
         >
-          {error}
+          {error || connectionError}
         </p>
       ) : null}
       {selected?.failureReason ? (
