@@ -21,7 +21,7 @@ const manifest = {
   setup_on_update: true,
   hook_attributes: { url: `${api}/webhooks/github`, active: true },
   public: true,
-  default_permissions: { contents: 'read', metadata: 'read', emails: 'read' },
+  default_permissions: { contents: 'read', metadata: 'read', emails: 'read', deployments: 'write' },
   default_events: ['push'],
   request_oauth_on_install: false,
   description: 'Sign in to LaunchPad, connect selected repositories, and deploy changes from your chosen branch.'
