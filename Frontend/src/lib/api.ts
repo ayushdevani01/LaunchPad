@@ -21,6 +21,7 @@ export type Project = {
   sourceDir?: string;
   installCommand?: string;
   buildCommand?: string;
+  startCommand?: string;
   outputDir?: string;
   customDomain?: string;
   createdAt: string;
@@ -60,6 +61,7 @@ export type Detection = {
   notes?: string;
   installCommand?: string;
   buildCommand?: string;
+  startCommand?: string;
   outputDir?: string;
 };
 
@@ -70,9 +72,10 @@ export type CreateProjectInput = {
   branch?: string;
   installCommand?: string;
   buildCommand?: string;
+  startCommand?: string;
   outputDir?: string;
   envVars?: Record<string, string>;
-  deploymentTarget?: "auto" | "static" | "nextjs-lambda";
+  deploymentTarget?: "auto" | "static" | "nextjs-web" | "nodejs-web";
   autoDeploy?: boolean;
   watchPaths?: string[];
 };

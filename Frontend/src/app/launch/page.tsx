@@ -289,6 +289,7 @@ function LaunchBody() {
   const [checkedName, setCheckedName] = React.useState("");
   const [installCommand, setInstallCommand] = React.useState("");
   const [buildCommand, setBuildCommand] = React.useState("");
+  const [startCommand, setStartCommand] = React.useState("");
   const [outputDir, setOutputDir] = React.useState("");
   const [envVars, setEnvVars] = React.useState<
     { key: string; value: string }[]
@@ -296,7 +297,7 @@ function LaunchBody() {
   const [advanced, setAdvanced] = React.useState(false);
   const [showEnvValues, setShowEnvValues] = React.useState(false);
   const [target, setTarget] = React.useState<
-    "auto" | "static" | "nextjs-lambda"
+    "auto" | "static" | "nextjs-web" | "nodejs-web"
   >("auto");
   const submitLock = React.useRef(false);
 
@@ -446,6 +447,7 @@ function LaunchBody() {
           if (data.supported !== "NO") {
             setInstallCommand(data.installCommand ?? "");
             setBuildCommand(data.buildCommand ?? "");
+            setStartCommand(data.startCommand ?? "");
             setOutputDir(data.outputDir ?? "");
           }
         })
@@ -577,6 +579,7 @@ function LaunchBody() {
         deploymentTarget: target,
         installCommand: installCommand.trim() || undefined,
         buildCommand: buildCommand.trim() || undefined,
+        startCommand: startCommand.trim() || undefined,
         outputDir: outputDir.trim() || undefined,
         envVars: Object.keys(env).length > 0 ? env : undefined,
         autoDeploy: autoDeploy && detection?.autoDeployAvailable !== false,
@@ -926,7 +929,7 @@ function LaunchBody() {
               <Field
                 label="Deployment target"
                 htmlFor="deployment-target"
-                hint="Use automatic detection for Next.js or a supported static build. Other frameworks need a static export."
+                hint="Detect Next.js, Node.js servers such as Express and Hono, or static frontend builds."
               >
                 <select
                   id="deployment-target"
@@ -937,9 +940,10 @@ function LaunchBody() {
                   className="h-10 w-full rounded-lg border border-white/[0.09] bg-panel px-3 text-[13px] text-fg"
                 >
                   <option value="auto">Automatic</option>
-                  <option value="nextjs-lambda">
-                    Next.js: server rendering and API routes
+                  <option value="nextjs-web">
+                    Next.js: native Web Function
                   </option>
+                  <option value="nodejs-web">Node.js server: Express / Hono / Fastify</option>
                   <option value="static">Static website / static export</option>
                 </select>
               </Field>
@@ -975,6 +979,7 @@ function LaunchBody() {
                       onClick={() => {
                         setInstallCommand(detection.installCommand ?? "");
                         setBuildCommand(detection.buildCommand ?? "");
+                        setStartCommand(detection.startCommand ?? "");
                         setOutputDir(detection.outputDir ?? "");
                       }}
                       className="inline-flex shrink-0 items-center gap-1.5 rounded border border-white/[0.1] px-2 py-1 font-mono text-[10px] text-faint hover:text-fg"
@@ -1014,11 +1019,14 @@ function LaunchBody() {
                       placeholder={
                         detection?.framework === "Next.js" &&
                         target !== "static"
-                          ? "Managed by OpenNext"
-                          : "dist"
+                          ? "Managed Next.js standalone build"
+                          : "Optional for Node servers; dist for static builds"
                       }
                       className="font-mono text-[12px]"
                     />
+                  </Field>
+                  <Field label="Node start command" htmlFor="start" hint="For Node server apps. Next.js starts automatically; static sites need no server.">
+                    <Input id="start" value={startCommand} onChange={event => setStartCommand(event.target.value)} placeholder="node dist/server.js" className="font-mono text-[12px]" />
                   </Field>
                   <Field label="Source folder" htmlFor="source-summary">
                     <Input
@@ -1163,7 +1171,7 @@ function LaunchBody() {
                       ? detection?.framework || "Automatic"
                       : target === "static"
                         ? "Static website"
-                        : "Next.js server"
+                        : target === "nodejs-web" ? "Node.js Web Function" : "Next.js Web Function"
                   }
                 />
                 <SummaryRow label="Folder" value={sourceDir || "/"} />

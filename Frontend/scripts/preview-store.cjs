@@ -62,7 +62,7 @@ function createPreviewStore({
     append(slug, id, "SUCCESS: Preview deployment ready", "finalize");
     return project;
   };
-  seed("studio-portfolio", "apps/web", "nextjs-lambda");
+  seed("studio-portfolio", "apps/web", "nextjs-web");
   const docs = seed("project-docs", "", "static");
   const failedId = randomUUID();
   deployments
