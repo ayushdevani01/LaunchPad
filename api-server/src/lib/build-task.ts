@@ -16,15 +16,14 @@ export async function triggerBuildTask(project: any, deployment: any, sourceAuth
         SOURCE_CREDENTIAL_URL: `${callbackBase.replace(/\/$/, '')}/build-source/${deployment._id}`,
         COMMIT_SHA: deployment.commitHash,
         CLIENT_PROJECT_ID: project.slug, DEPLOYMENT_ID: deployment._id.toString(),
-        SOURCE_DIR: project.sourceDir || '', INSTALL_COMMAND: project.installCommand || '', BUILD_COMMAND: project.buildCommand || '',
+        SOURCE_DIR: project.sourceDir || '', INSTALL_COMMAND: project.installCommand || '', BUILD_COMMAND: project.buildCommand || '', START_COMMAND: project.startCommand || '',
         BUILD_OUTPUT_DIR: project.outputDir || '', DEPLOYMENT_TARGET: project.deploymentTarget || 'auto',
         BRANCH: project.branch || 'main', USER_ENV_VARS: JSON.stringify(applicationEnv),
         AWS_REGION: process.env.AWS_REGION || 'ap-south-1', AWS_BUCKET_NAME: process.env.AWS_BUCKET_NAME || '',
         REDIS_URL: process.env.BUILD_REDIS_URL || '',
         API_CALLBACK_URL: `${callbackBase.replace(/\/$/, '')}/projects/${project.slug}/deployments/${deployment._id}/status`,
         LAMBDA_ARCHITECTURE: 'arm64',
-        LAMBDA_PERMISSIONS_BOUNDARY_ARN: process.env.LAMBDA_PERMISSIONS_BOUNDARY_ARN || '',
-        LAMBDA_RESERVED_CONCURRENCY: process.env.LAMBDA_RESERVED_CONCURRENCY || '',
+        LAMBDA_WEB_ROLE_ARN: process.env.LAMBDA_WEB_ROLE_ARN || '',
         AWS_EC2_METADATA_DISABLED: 'true'
     }
     let failureReason = 'Build task could not start'

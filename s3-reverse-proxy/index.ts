@@ -2,8 +2,8 @@ import dotenv from 'dotenv'
 import mongoose, { Schema } from 'mongoose'
 import { Readable } from 'stream'
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
-import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda'
 import { createApp } from './app'
+import { forwardWeb } from './web'
 
 dotenv.config()
 const Project = mongoose.model('Project', new Schema({ slug: String, currentDeployment: Schema.Types.ObjectId }))
@@ -11,7 +11,6 @@ const Deployment = mongoose.model('Deployment', new Schema({ projectId: Schema.T
 const region = process.env.AWS_REGION || 'ap-south-1'
 const endpoint = process.env.AWS_ENDPOINT || undefined
 const s3 = new S3Client({ region, endpoint, forcePathStyle: !!endpoint, ...(endpoint ? { credentials: { accessKeyId: 'mock', secretAccessKey: 'mock' } } : {}) })
-const clients = new Map<string, LambdaClient>()
 const app = createApp({
     async resolve(slug) {
         const project = await Project.findOne({ slug }).lean()
@@ -23,13 +22,7 @@ const app = createApp({
         const output = await s3.send(new GetObjectCommand({ Bucket: process.env.AWS_BUCKET_NAME || 'launchpad-assets', Key: key }), { abortSignal: AbortSignal.timeout(30000) })
         return { body: output.Body as Readable, contentType: output.ContentType, cacheControl: output.CacheControl, etag: output.ETag }
     },
-    async invoke(name, targetRegion, event) {
-        let client = clients.get(targetRegion)
-        if (!client) { client = new LambdaClient({ region: targetRegion }); clients.set(targetRegion, client) }
-        const output = await client.send(new InvokeCommand({ FunctionName: name, Payload: Buffer.from(JSON.stringify(event)) }), { abortSignal: AbortSignal.timeout(35000) })
-        if (output.FunctionError || !output.Payload) throw new Error('LambdaInvocationFailed')
-        return output.Payload
-    }
+    forward: forwardWeb
 })
 
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/launchpad')

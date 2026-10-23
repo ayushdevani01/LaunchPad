@@ -126,3 +126,16 @@ test('framework detection reads the selected folder on the exact chosen branch',
     assert.equal((await response.json()).detection.supported, 'YES')
   })
 })
+
+test('Node server detection supports Express and Hono without inventing a build command or static folder', async () => {
+  for (const dependency of ['express', 'hono']) {
+    await withAPI(async () => ({ data: { encoding: 'base64', content: Buffer.from(JSON.stringify({ dependencies: { [dependency]: '1' }, scripts: { start: 'node server.js' } })).toString('base64') } }), async request => {
+      const response = await request('/detect?owner=owner&repo=repo&branch=main')
+      const { detection } = await response.json()
+      assert.equal(detection.supported, 'YES')
+      assert.equal(detection.buildCommand, '')
+      assert.equal(detection.outputDir, '')
+      assert.equal(detection.startCommand, 'node server.js')
+    })
+  }
+})

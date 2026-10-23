@@ -1,19 +1,18 @@
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3'
 import { Deployment } from '../models/Deployment'
 import { Project } from '../models/Project'
+import { createHash } from 'node:crypto'
 
 export interface RuntimeManifest {
     version: number
     projectId: string
     deploymentId: string
-    target: 'static' | 'nextjs-lambda'
+    target: 'static' | 'nextjs-web' | 'nodejs-web'
     assetPrefix: string
     region: string
-    serverFunction?: string
-    imageFunction?: string
-    stackName?: string
-    publicFiles?: string[]
-    adapterVersion?: string
+    functionName?: string
+    endpointUrl?: string
+    staticPrefixes?: string[]
     nextVersion?: string
     runtime?: string
     architecture?: string
@@ -23,15 +22,21 @@ export function validateResult(value: any, slug: string, deploymentId: string) {
     if (!value || !['SUCCESS', 'FAILED'].includes(value.status)) throw new Error('Invalid deployment result')
     if (value.status === 'SUCCESS') {
         const m = value.manifest as RuntimeManifest
-        if (!m || m.version !== 1 || m.projectId !== slug || m.deploymentId !== deploymentId ||
-            m.assetPrefix !== `__outputs/${slug}/${deploymentId}` || !['static', 'nextjs-lambda'].includes(m.target)) {
+        if (!m || m.version !== 2 || m.projectId !== slug || m.deploymentId !== deploymentId ||
+            m.assetPrefix !== `__outputs/${slug}/${deploymentId}` || !['static', 'nextjs-web', 'nodejs-web'].includes(m.target)) {
             throw new Error('Invalid deployment manifest')
         }
-        if (m.target === 'nextjs-lambda' && (!m.serverFunction || !/^lp-[a-z0-9-]+-server$/.test(m.serverFunction) ||
-            !/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(m.region))) throw new Error('Invalid Lambda routing metadata')
-        if (m.imageFunction && !/^lp-[a-z0-9-]+-image$/.test(m.imageFunction)) throw new Error('Invalid image routing metadata')
-        if (m.publicFiles && (!Array.isArray(m.publicFiles) || m.publicFiles.some(p => typeof p !== 'string' || !p.startsWith('/')))) {
-            throw new Error('Invalid public file manifest')
+        if (m.target !== 'static') {
+            const hash = createHash('sha256').update(deploymentId).digest('hex').slice(0, 12)
+            if (m.functionName !== `lp-${slug.slice(0, 20).replace(/-+$/, '')}-${hash}-web` ||
+                !/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/.test(m.region)) throw new Error('Invalid Web Function routing metadata')
+            let endpoint: URL
+            try { endpoint = new URL(m.endpointUrl || '') } catch { throw new Error('Invalid Web Function endpoint') }
+            if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.port || endpoint.pathname !== '/' || endpoint.search || endpoint.hash ||
+                !new RegExp(`^[a-z0-9-]+\\.[a-z0-9-]+\\.lambda-web\\.${m.region}\\.on\\.aws$`).test(endpoint.hostname)) throw new Error('Invalid Web Function endpoint')
+        }
+        if (m.staticPrefixes && (!Array.isArray(m.staticPrefixes) || m.staticPrefixes.some(p => !['/', '/_next/static/'].includes(p)) || (m.target === 'nextjs-web' && m.staticPrefixes.includes('/')))) {
+            throw new Error('Invalid static routing manifest')
         }
     }
     return value as { status: 'SUCCESS' | 'FAILED'; manifest?: RuntimeManifest; message?: string }

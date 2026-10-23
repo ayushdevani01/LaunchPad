@@ -103,7 +103,7 @@ services:
       BUILD_MAX_CONCURRENT: "2"
       BUILD_REDIS_URL: ${BUILD_REDIS_URL:?Set the worker-reachable Redis URL in .env}
       BUILD_CALLBACK_BASE_URL: https://api.${BASE_DOMAIN}
-      LAMBDA_PERMISSIONS_BOUNDARY_ARN: ${LAMBDA_PERMISSIONS_BOUNDARY_ARN:?Set the runtime boundary}
+      LAMBDA_WEB_ROLE_ARN: ${LAMBDA_WEB_ROLE_ARN:?Set the logs-only Web Function role}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
       GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
@@ -150,7 +150,7 @@ services:
       BUILD_MAX_CONCURRENT: "2"
       BUILD_REDIS_URL: ${BUILD_REDIS_URL:?Set BUILD_REDIS_URL in .env}
       BUILD_CALLBACK_BASE_URL: https://api.${BASE_DOMAIN}
-      LAMBDA_PERMISSIONS_BOUNDARY_ARN: ${LAMBDA_PERMISSIONS_BOUNDARY_ARN:?Set the runtime boundary}
+      LAMBDA_WEB_ROLE_ARN: ${LAMBDA_WEB_ROLE_ARN:?Set the logs-only Web Function role}
     depends_on:
       api-server: {condition: service_healthy}
       kafka: {condition: service_healthy}

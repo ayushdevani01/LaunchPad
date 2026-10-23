@@ -102,8 +102,21 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
                     installCommand: 'npm install',
                     buildCommand: 'npm run build',
                     outputDir: '',
-                    notes: 'Server rendering and API routes deploy to AWS Lambda. Static assets are served from S3.'
+                    notes: 'One native Lambda Web Function serves pages, API routes, actions and images. Immutable assets are served from S3 on the same project URL.'
                 }
+            }
+        }
+
+        // Node HTTP servers take precedence over a frontend build tool in a
+        // full-stack project. Users can select an optional SPA output folder.
+        const serverFramework = [['express', 'Express'], ['fastify', 'Fastify'], ['hono', 'Hono'], ['koa', 'Koa'], ['@nestjs/core', 'NestJS']].find(([name]) => deps[name])
+        const startCommand = /^node\s+/.test(pkg.scripts?.['start:prod'] || '') ? pkg.scripts['start:prod'] : pkg.scripts?.start
+        if (serverFramework || /^node\s+/.test(startCommand || '')) {
+            return {
+                framework: serverFramework?.[1] || 'Node.js HTTP Server', supported: 'YES',
+                installCommand: 'npm install', buildCommand: pkg.scripts?.build ? 'npm run build' : '',
+                startCommand: startCommand || (pkg.main ? `node ${pkg.main}` : ''), outputDir: '',
+                notes: 'Runs on native Lambda Web Functions with Node.js 24 and ARM64. Use a production start command such as node dist/server.js. Leave output empty for a backend, or set a static SPA folder and use /api for server routes.'
             }
         }
 
@@ -191,7 +204,7 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
             installCommand: 'npm install',
             buildCommand: 'npm run build',
             outputDir: 'dist',
-            notes: 'Node project detected. Ensure it builds static HTML/JS/CSS assets.'
+            notes: 'Choose a static output folder or the Node.js Web Function target with a production Node start command.'
         }
 
     } catch (err: any) {
@@ -212,7 +225,7 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
                 return {
                     framework: 'Unknown Project',
                     supported: 'NO',
-                    notes: 'No package.json or index.html found. We only support Node.js static frameworks or plain HTML websites.'
+                    notes: 'No package.json or index.html found. Select a folder containing a Node.js app or static website.'
                 }
             }
         }
@@ -389,13 +402,13 @@ router.get('/check-name', async (req: Request, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
     try {
-        const { gitURL, project_name, buildCommand, installCommand, outputDir, envVars } = req.body
+        const { gitURL, project_name, buildCommand, startCommand, installCommand, outputDir, envVars } = req.body
         const source = repositoryFromURL(gitURL)
         const { path: sourceDir, branch } = githubSource({ ...source, path: req.body.sourceDir || '', branch: req.body.branch || 'main' })
         const projectSlug = typeof project_name === 'string' ? project_name.trim() : generateSlug()
         if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(projectSlug)) return res.status(400).json({ error: 'Invalid project name' })
         const deploymentTarget = req.body.deploymentTarget || 'auto'
-        if (!['auto', 'static', 'nextjs-lambda'].includes(deploymentTarget)) return res.status(400).json({ error: 'Invalid deployment target' })
+        if (!['auto', 'static', 'nextjs-web', 'nodejs-web'].includes(deploymentTarget)) return res.status(400).json({ error: 'Invalid deployment target' })
         const watchPaths = req.body.watchPaths || []
         if (!Array.isArray(watchPaths) || watchPaths.length > 50) return res.status(400).json({ error: 'Use at most 50 additional watch paths' })
         for (const path of watchPaths) githubSource({ ...source, path })
@@ -406,6 +419,7 @@ router.post('/', async (req: Request, res: Response) => {
         const project = await Project.create({ slug: projectSlug, gitUrl: access.repo.clone_url, sourceDir, userId, branch,
             githubRepositoryId: access.repo.id, githubInstallationId: access.installationId,
             buildCommand: typeof buildCommand === 'string' ? buildCommand.trim() : undefined,
+            startCommand: typeof startCommand === 'string' ? startCommand.trim() : undefined,
             installCommand: typeof installCommand === 'string' ? installCommand.trim() : undefined,
             outputDir: typeof outputDir === 'string' ? outputDir.trim() : undefined,
             envVars, deploymentTarget, watchPaths, autoDeploy: !!access.installationId && req.body.autoDeploy !== false })

@@ -6,7 +6,7 @@ COPY package*.json ./
 RUN npm ci
 
 COPY tsconfig.json ./
-COPY index.ts app.ts ./
+COPY index.ts app.ts web.ts ./
 
 RUN npm run build && npm prune --omit=dev
 

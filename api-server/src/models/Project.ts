@@ -7,6 +7,7 @@ export interface IProject extends Document {
     sourceDir?: string
     userId: mongoose.Types.ObjectId
     buildCommand?: string
+    startCommand?: string
     installCommand?: string
     outputDir?: string
     branch?: string
@@ -17,7 +18,7 @@ export interface IProject extends Document {
     githubInstallationId?: number
     autoDeploy?: boolean
     watchPaths?: string[]
-    deploymentTarget?: 'auto' | 'static' | 'nextjs-lambda'
+    deploymentTarget?: 'auto' | 'static' | 'nextjs-web' | 'nodejs-web'
     createdAt: Date
     updatedAt: Date
 }
@@ -28,6 +29,7 @@ const ProjectSchema = new Schema<IProject>({
     sourceDir: { type: String },
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     buildCommand: { type: String },
+    startCommand: { type: String },
     installCommand: { type: String },
     outputDir: { type: String },
     branch: { type: String, default: 'main' },
@@ -38,7 +40,7 @@ const ProjectSchema = new Schema<IProject>({
     githubInstallationId: Number,
     autoDeploy: { type: Boolean, default: true },
     watchPaths: { type: [String], default: [] },
-    deploymentTarget: { type: String, enum: ['auto', 'static', 'nextjs-lambda'], default: 'auto' },
+    deploymentTarget: { type: String, enum: ['auto', 'static', 'nextjs-web', 'nodejs-web'], default: 'auto' },
 }, { timestamps: true })
 
 ProjectSchema.index({ userId: 1 })
