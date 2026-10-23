@@ -102,16 +102,24 @@ export async function repositoryAccess(user: IUser | null, owner: string, name: 
     return { token, repo, installationId: installation.id as number }
 }
 
-export async function installationToken(installationId: number, repositoryId: number) {
+async function mintInstallationToken(installationId: number, repositoryId: number, permissions: { contents?: 'read'; deployments?: 'write' }) {
     const state = await GitHubInstallation.findOne({ installationId })
     if (state?.deleted || state?.suspended) throw new GitHubAccessError('Repository installation is no longer active.')
-    try {
-        const { data } = await axios.post(`https://api.github.com/app/installations/${installationId}/access_tokens`,
-            { repository_ids: [repositoryId], permissions: { contents: 'read' } },
-            { headers: githubHeaders(appJWT()), timeout: 15000 })
-        if (!data.token) throw new Error('Missing token')
-        return data.token as string
-    } catch { throw new GitHubAccessError('Repository access was removed or GitHub is unavailable. Reconnect the repository.', 403) }
+    const { data } = await axios.post(`https://api.github.com/app/installations/${installationId}/access_tokens`,
+        { repository_ids: [repositoryId], permissions },
+        { headers: githubHeaders(appJWT()), timeout: 15000 })
+    if (typeof data.token !== 'string' || !data.token) throw new Error('Missing installation token')
+    return data.token as string
+}
+
+export async function installationToken(installationId: number, repositoryId: number) {
+    try { return await mintInstallationToken(installationId, repositoryId, { contents: 'read' }) }
+    catch { throw new GitHubAccessError('Repository access was removed or GitHub is unavailable. Reconnect the repository.', 403) }
+}
+
+// Reporting credentials never reach build containers and cannot read code.
+export async function deploymentReportingToken(installationId: number, repositoryId: number) {
+    return mintInstallationToken(installationId, repositoryId, { deployments: 'write' })
 }
 
 export function repositoryFromURL(raw: unknown) {
