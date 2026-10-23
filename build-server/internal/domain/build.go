@@ -10,9 +10,10 @@ type Log func(stage, level, stream, message string)
 type Request struct {
 	ProjectID, DeploymentID, GitURL, Branch, SourceDir                   string
 	CommitSHA, SourceCredentialURL, SourceAuthorization                  string
-	InstallCommand, BuildCommand, OutputDir, Target                      string
+	CheckoutDir                                                          string
+	InstallCommand, BuildCommand, StartCommand, OutputDir, Target        string
 	Bucket, Region, Endpoint, RedisURL, CallbackURL, WorkDir             string
-	Architecture, OpenNextVersion                                        string
+	Architecture, WebRoleARN                                             string
 	UserEnv                                                              map[string]string
 	CloneTimeout, InstallTimeout, BuildTimeout, DeployTimeout, Heartbeat time.Duration
 }
@@ -26,24 +27,19 @@ type Manifest struct {
 	Target         string   `json:"target"`
 	AssetPrefix    string   `json:"assetPrefix"`
 	Region         string   `json:"region"`
-	StackName      string   `json:"stackName,omitempty"`
-	ServerURL      string   `json:"serverUrl,omitempty"`
-	ServerFunction string   `json:"serverFunction,omitempty"`
-	ImageFunction  string   `json:"imageFunction,omitempty"`
-	ImageURL       string   `json:"imageUrl,omitempty"`
-	AdapterVersion string   `json:"adapterVersion,omitempty"`
+	FunctionName   string   `json:"functionName,omitempty"`
+	EndpointURL    string   `json:"endpointUrl,omitempty"`
 	NextVersion    string   `json:"nextVersion,omitempty"`
 	Runtime        string   `json:"runtime,omitempty"`
 	Architecture   string   `json:"architecture,omitempty"`
-	PublicFiles    []string `json:"publicFiles,omitempty"`
+	StaticPrefixes []string `json:"staticPrefixes,omitempty"`
 }
 
 type Artifact struct{ Directory, Prefix, ContentType string }
 type Package struct {
-	Target, ServerDir, ImageDir, RevalidationDir, CacheDir string
-	Assets                                                 []Artifact
-	PublicFiles                                            []string
-	NextVersion, AdapterVersion                            string
+	Target, ServerDir, NextVersion string
+	Assets                         []Artifact
+	StaticPrefixes                 []string
 }
 
 type Command struct {

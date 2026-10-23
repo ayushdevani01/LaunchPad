@@ -6,9 +6,7 @@ import (
 	"os"
 
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/lambdaweb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"launchpad/build-server/internal/adapter"
@@ -60,8 +58,8 @@ func Run(ctx context.Context) int {
 		}
 	})}
 	process := repository.Process{Log: logger.Log, Heartbeat: r.Heartbeat}
-	runtime := repository.LambdaRuntime{CloudFormation: cloudformation.NewFromConfig(cfg), Lambda: lambda.NewFromConfig(cfg), DynamoDB: dynamodb.NewFromConfig(cfg), Store: store, Log: logger.Log}
-	build := service.Build{Source: repository.Git{Runner: process}, Runner: process, Store: store, Runtime: runtime, Callback: repository.HTTPCallback{}, Adapters: adapter.New(adapter.Static{Runner: process}, adapter.OpenNext{Runner: process}), Log: logger.Log, ArchivePath: logger.Path()}
+	runtime := repository.WebRuntime{Client: lambdaweb.NewFromConfig(cfg), Credentials: cfg.Credentials, Store: store, Log: logger.Log}
+	build := service.Build{Source: repository.Git{Runner: process}, Runner: process, Store: store, Runtime: runtime, Callback: repository.HTTPCallback{}, Adapters: adapter.New(adapter.Static{Runner: process}, adapter.NextWeb{Runner: process}, adapter.NodeWeb{Runner: process}), Log: logger.Log, ArchivePath: logger.Path()}
 	if _, err = build.Run(ctx, r); err != nil {
 		return 1
 	}

@@ -24,10 +24,10 @@ func New(adapters ...domain.Adapter) Registry {
 func (r Registry) Resolve(target, source string) (domain.Adapter, error) {
 	if target == "auto" {
 		target = "static"
-		var pkg struct{ Dependencies, DevDependencies map[string]string }
+		var pkg struct{ Dependencies, DevDependencies, Scripts map[string]string }
 		b, err := os.ReadFile(filepath.Join(source, "package.json"))
 		if err == nil && json.Unmarshal(b, &pkg) == nil && (pkg.Dependencies["next"] != "" || pkg.DevDependencies["next"] != "") {
-			target = "nextjs-lambda"
+			target = "nextjs-web"
 			// A pre-existing static export stays static. The generated out/index.html is
 			// also checked after build, so unsupported output is never uploaded blindly.
 			for _, name := range []string{"next.config.js", "next.config.mjs", "next.config.ts"} {
@@ -36,6 +36,18 @@ func (r Registry) Resolve(target, source string) (domain.Adapter, error) {
 				if strings.Contains(s, `output:'export'`) || strings.Contains(s, `output:"export"`) {
 					target = "static"
 				}
+			}
+		} else if err == nil && json.Unmarshal(b, &pkg) == nil {
+			for _, name := range []string{"express", "fastify", "hono", "@hono/node-server", "koa", "@nestjs/core"} {
+				if pkg.Dependencies[name] != "" || pkg.DevDependencies[name] != "" {
+					target = "nodejs-web"
+				}
+			}
+			if strings.HasPrefix(strings.TrimSpace(pkg.Scripts["start"]), "node ") {
+				target = "nodejs-web"
+			}
+			if strings.HasPrefix(strings.TrimSpace(pkg.Scripts["start:prod"]), "node ") {
+				target = "nodejs-web"
 			}
 		}
 	}

@@ -10,7 +10,7 @@ func TestConfigValidation(t *testing.T) {
 	t.Setenv("GIT_REPOSITORY__URL", "https://github.com/example/site")
 	t.Setenv("AWS_BUCKET_NAME", "test-assets")
 	r, err := Load()
-	if err != nil || r.Target != "auto" || r.OpenNextVersion != "4.1.12" {
+	if err != nil || r.Target != "auto" || r.Architecture != "arm64" {
 		t.Fatalf("defaults: %v", err)
 	}
 	t.Setenv("USER_ENV_VARS", `{"AWS_ACCESS_KEY_ID":"bad"}`)

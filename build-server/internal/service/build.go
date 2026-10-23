@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"launchpad/build-server/internal/adapter"
@@ -78,6 +79,7 @@ func (b Build) Run(ctx context.Context, r domain.Request) (result domain.Manifes
 	if err = b.Source.Clone(ctx, r, checkout); err != nil {
 		return result, err
 	}
+	r.CheckoutDir = checkout
 	source, err := adapter.Inside(checkout, r.SourceDir)
 	if err != nil {
 		return result, fmt.Errorf("source directory: %w", err)
@@ -87,6 +89,9 @@ func (b Build) Run(ctx context.Context, r domain.Request) (result domain.Manifes
 		return result, err
 	}
 	b.Log("prepare", "info", "", "Selected adapter: "+a.Name())
+	if a.Name() != "static" && runtime.GOOS == "linux" && runtime.GOARCH != "arm64" {
+		return result, fmt.Errorf("Node.js Web Function builds require the Linux ARM64 worker image")
+	}
 	stage = "install"
 	command := r.InstallCommand
 	if command == "" {
@@ -117,19 +122,19 @@ func (b Build) Run(ctx context.Context, r domain.Request) (result domain.Manifes
 			return result, err
 		}
 	}
-	result = domain.Manifest{Version: 1, ProjectID: r.ProjectID, DeploymentID: r.DeploymentID, Target: p.Target, AssetPrefix: prefix, Region: r.Region, PublicFiles: p.PublicFiles}
+	result = domain.Manifest{Version: 2, ProjectID: r.ProjectID, DeploymentID: r.DeploymentID, Target: p.Target, AssetPrefix: prefix, Region: r.Region, StaticPrefixes: p.StaticPrefixes}
 	if p.Target != "static" {
 		stage = "deploy"
 		if b.Runtime == nil {
 			return result, fmt.Errorf("runtime deployment is not configured")
 		}
-		b.Log(stage, "info", "", "Creating immutable Lambda deployment")
+		b.Log(stage, "info", "", "Creating native Lambda Web Function")
 		result, err = b.Runtime.Deploy(deployCtx, r, p)
 		if err != nil {
 			return result, err
 		}
 		result.AssetPrefix = prefix
-		result.PublicFiles = p.PublicFiles
+		result.StaticPrefixes = p.StaticPrefixes
 	}
 	// Only this final marker makes artifacts routable. Logs/cache/server packages
 	// live outside the public __outputs prefix.

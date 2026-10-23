@@ -15,9 +15,9 @@ func (noRunner) Run(context.Context, domain.Command) error { return nil }
 func TestFrameworkSelectionAndStaticRoot(t *testing.T) {
 	root := t.TempDir()
 	os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"dependencies":{"next":"16.4.2"}}`), 0644)
-	r := New(Static{}, OpenNext{})
+	r := New(Static{}, NextWeb{}, NodeWeb{})
 	a, err := r.Resolve("auto", root)
-	if err != nil || a.Name() != "nextjs-lambda" {
+	if err != nil || a.Name() != "nextjs-web" {
 		t.Fatal("Next.js not detected")
 	}
 	os.WriteFile(filepath.Join(root, "next.config.mjs"), []byte(`export default {output: 'export'}`), 0644)

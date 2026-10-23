@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -15,10 +14,6 @@ import (
 )
 
 func Load() (domain.Request, error) {
-	nativeArchitecture := "x86_64"
-	if runtime.GOARCH == "arm64" {
-		nativeArchitecture = "arm64"
-	}
 	get := func(k, fallback string) string {
 		if s := os.Getenv(k); s != "" {
 			return s
@@ -27,11 +22,11 @@ func Load() (domain.Request, error) {
 	}
 	r := domain.Request{
 		ProjectID: os.Getenv("CLIENT_PROJECT_ID"), DeploymentID: os.Getenv("DEPLOYMENT_ID"), GitURL: os.Getenv("GIT_REPOSITORY__URL"),
-		Branch: get("BRANCH", "main"), SourceDir: get("SOURCE_DIR", "."), InstallCommand: os.Getenv("INSTALL_COMMAND"), BuildCommand: os.Getenv("BUILD_COMMAND"),
+		Branch: get("BRANCH", "main"), SourceDir: get("SOURCE_DIR", "."), InstallCommand: os.Getenv("INSTALL_COMMAND"), BuildCommand: os.Getenv("BUILD_COMMAND"), StartCommand: os.Getenv("START_COMMAND"),
 		CommitSHA: os.Getenv("COMMIT_SHA"), SourceCredentialURL: os.Getenv("SOURCE_CREDENTIAL_URL"), SourceAuthorization: os.Getenv("SOURCE_AUTHORIZATION"),
 		OutputDir: os.Getenv("BUILD_OUTPUT_DIR"), Target: get("DEPLOYMENT_TARGET", "auto"), Bucket: os.Getenv("AWS_BUCKET_NAME"),
 		Region: get("AWS_REGION", "ap-south-1"), Endpoint: os.Getenv("AWS_ENDPOINT"), RedisURL: os.Getenv("REDIS_URL"), CallbackURL: os.Getenv("API_CALLBACK_URL"),
-		WorkDir: get("BUILD_WORK_DIR", "/home/app/work"), Architecture: get("LAMBDA_ARCHITECTURE", nativeArchitecture), OpenNextVersion: "4.1.12",
+		WorkDir: get("BUILD_WORK_DIR", "/home/app/work"), Architecture: get("LAMBDA_ARCHITECTURE", "arm64"), WebRoleARN: os.Getenv("LAMBDA_WEB_ROLE_ARN"),
 		UserEnv: map[string]string{},
 	}
 	for key, value := range map[string]string{"CLIENT_PROJECT_ID": r.ProjectID, "DEPLOYMENT_ID": r.DeploymentID, "GIT_REPOSITORY__URL": r.GitURL, "AWS_BUCKET_NAME": r.Bucket} {
@@ -62,15 +57,12 @@ func Load() (domain.Request, error) {
 		}
 	}
 	switch r.Target {
-	case "auto", "static", "nextjs-lambda":
+	case "auto", "static", "nextjs-web", "nodejs-web":
 	default:
 		return r, fmt.Errorf("unsupported deployment target: %s", r.Target)
 	}
-	if r.Architecture != "x86_64" && r.Architecture != "arm64" {
-		return r, fmt.Errorf("invalid LAMBDA_ARCHITECTURE")
-	}
-	if runtime.GOOS == "linux" && r.Architecture != nativeArchitecture {
-		return r, fmt.Errorf("LAMBDA_ARCHITECTURE must match the worker container CPU architecture")
+	if r.Architecture != "arm64" {
+		return r, fmt.Errorf("Lambda Web Functions require ARM64 dependencies")
 	}
 	if r.Endpoint != "" {
 		u, err := url.ParseRequestURI(r.Endpoint)

@@ -4,48 +4,46 @@ import (
 	"archive/zip"
 	"context"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
-	cf "github.com/aws/aws-sdk-go-v2/service/cloudformation/types"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	db "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/aws/aws-sdk-go-v2/service/lambda"
+	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
+	"github.com/aws/aws-sdk-go-v2/service/lambdaweb"
+	web "github.com/aws/aws-sdk-go-v2/service/lambdaweb/types"
 
 	"launchpad/build-server/internal/domain"
 )
 
-//go:embed templates/opennext.json
-var OpenNextTemplate string
-
-//go:embed templates/revalidation.mjs
-var revalidationHandler string
-
-type LambdaRuntime struct {
-	CloudFormation *cloudformation.Client
-	Lambda         *lambda.Client
-	DynamoDB       *dynamodb.Client
-	Store          domain.Store
-	Log            domain.Log
+type WebAPI interface {
+	CreateWebFunction(context.Context, *lambdaweb.CreateWebFunctionInput, ...func(*lambdaweb.Options)) (*lambdaweb.CreateWebFunctionOutput, error)
+	GetWebFunctionEndpoint(context.Context, *lambdaweb.GetWebFunctionEndpointInput, ...func(*lambdaweb.Options)) (*lambdaweb.GetWebFunctionEndpointOutput, error)
+	DeleteWebFunction(context.Context, *lambdaweb.DeleteWebFunctionInput, ...func(*lambdaweb.Options)) (*lambdaweb.DeleteWebFunctionOutput, error)
+}
+type WebRuntime struct {
+	Client       WebAPI
+	Credentials  aws.CredentialsProvider
+	HTTP         *http.Client
+	Store        domain.Store
+	Log          domain.Log
+	PollInterval time.Duration
 }
 
-func StackName(project, deployment string) string {
+func FunctionName(project, deployment string) string {
 	if len(project) > 20 {
 		project = project[:20]
 	}
 	h := sha256.Sum256([]byte(deployment))
-	return "lp-" + strings.TrimRight(project, "-") + "-" + hex.EncodeToString(h[:6])
+	return "lp-" + strings.TrimRight(project, "-") + "-" + hex.EncodeToString(h[:6]) + "-web"
 }
 func ZipDirectory(root, dest string, maxBytes int64) error {
 	f, err := os.Create(dest)
@@ -55,7 +53,7 @@ func ZipDirectory(root, dest string, maxBytes int64) error {
 	defer f.Close()
 	z := zip.NewWriter(f)
 	var total int64
-	err = filepath.WalkDir(root, func(path string, e fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, e fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -65,7 +63,7 @@ func ZipDirectory(root, dest string, maxBytes int64) error {
 		if e.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("symlink in runtime artifact is unsupported: %s", e.Name())
 		}
-		rel, err := filepath.Rel(root, path)
+		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
 		}
@@ -80,28 +78,27 @@ func ZipDirectory(root, dest string, maxBytes int64) error {
 		}
 		total += info.Size()
 		if total > maxBytes {
-			return fmt.Errorf("runtime package exceeds uncompressed size limit")
+			return fmt.Errorf("runtime package exceeds the 512 MiB uncompressed limit")
 		}
 		h, err := zip.FileInfoHeader(info)
 		if err != nil {
 			return err
 		}
-		h.Name = filepath.ToSlash(rel)
-		h.Method = zip.Deflate
+		h.Name, h.Method = filepath.ToSlash(rel), zip.Deflate
 		mode := os.FileMode(0644)
 		if info.Mode()&0111 != 0 {
 			mode = 0755
 		}
 		h.SetMode(mode)
-		w, err := z.CreateHeader(h)
+		out, err := z.CreateHeader(h)
 		if err != nil {
 			return err
 		}
-		in, err := os.Open(path)
+		in, err := os.Open(p)
 		if err != nil {
 			return err
 		}
-		_, err = io.Copy(w, in)
+		_, err = io.Copy(out, in)
 		in.Close()
 		return err
 	})
@@ -111,234 +108,139 @@ func ZipDirectory(root, dest string, maxBytes int64) error {
 	}
 	return closeErr
 }
-
-func RuntimeTemplate(appEnv map[string]string) (string, []cf.Parameter, error) {
-	var t map[string]any
-	if err := json.Unmarshal([]byte(OpenNextTemplate), &t); err != nil {
-		return "", nil, err
-	}
-	parameters := t["Parameters"].(map[string]any)
-	resources := t["Resources"].(map[string]any)
-	server := resources["Server"].(map[string]any)["Properties"].(map[string]any)
-	vars := server["Environment"].(map[string]any)["Variables"].(map[string]any)
-	values := []cf.Parameter{}
-	i := 0
-	for key, value := range appEnv {
-		name := fmt.Sprintf("AppEnv%d", i)
-		i++
-		parameters[name] = map[string]any{"Type": "String", "NoEcho": true, "Description": "Application runtime environment value"}
-		vars[key] = map[string]any{"Ref": name}
-		values = append(values, cf.Parameter{ParameterKey: aws.String(name), ParameterValue: aws.String(value)})
-	}
-	b, err := json.Marshal(t)
-	return string(b), values, err
+func ValidWebEndpoint(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.User == nil && u.Port() == "" && u.RawQuery == "" && u.Fragment == "" && (u.Path == "" || u.Path == "/") && regexp.MustCompile(`^[a-z0-9-]+\.[a-z0-9-]+\.lambda-web\.[a-z0-9-]+\.on\.aws$`).MatchString(u.Hostname())
 }
-
-func (l LambdaRuntime) Deploy(ctx context.Context, r domain.Request, p domain.Package) (manifest domain.Manifest, err error) {
-	stack := StackName(r.ProjectID, r.DeploymentID)
-	prefix := "__artifacts/" + r.ProjectID + "/" + r.DeploymentID
-	cachePrefix := "__cache/" + r.ProjectID + "/" + r.DeploymentID
-	keys := map[string]string{"ServerKey": "", "ImageKey": "", "RevalidationKey": ""}
-	if p.RevalidationDir != "" {
-		if err = os.WriteFile(filepath.Join(p.RevalidationDir, "index.mjs"), []byte(revalidationHandler), 0644); err != nil {
-			return manifest, err
+func (w WebRuntime) health(ctx context.Context, r domain.Request, endpoint string) error {
+	client := w.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 40 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	}
+	for _, path := range []string{"/.launchpad/health", "/"} {
+		req, err := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(endpoint, "/")+path, nil)
+		if err != nil {
+			return err
+		}
+		hash := sha256.Sum256(nil)
+		payload := hex.EncodeToString(hash[:])
+		req.Header.Set("X-Amz-Content-Sha256", payload)
+		req.Header.Set("X-Forwarded-Host", r.ProjectID+".launch-pad.dev")
+		req.Header.Set("X-Forwarded-Proto", "https")
+		credentials, err := w.Credentials.Retrieve(ctx)
+		if err != nil {
+			return err
+		}
+		if err = v4.NewSigner().SignHTTP(ctx, credentials, req, payload, "lambda", r.Region, time.Now()); err != nil {
+			return err
+		}
+		response, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("web runtime health request: %w", err)
+		}
+		io.Copy(io.Discard, io.LimitReader(response.Body, 1024*1024))
+		response.Body.Close()
+		if response.StatusCode >= 500 || path == "/.launchpad/health" && response.StatusCode != 200 {
+			return fmt.Errorf("web runtime health returned HTTP %d", response.StatusCode)
 		}
 	}
-	for _, item := range []struct{ name, path string }{{"ServerKey", p.ServerDir}, {"ImageKey", p.ImageDir}, {"RevalidationKey", p.RevalidationDir}} {
-		if item.path == "" {
-			continue
-		}
-		f, e := os.CreateTemp("", "launchpad-runtime-*.zip")
-		if e != nil {
-			return manifest, e
-		}
-		path := f.Name()
-		f.Close()
-		e = ZipDirectory(item.path, path, 250*1024*1024)
-		if e == nil {
-			key := prefix + "/" + item.name + ".zip"
-			l.Log("deploy", "info", "", "Uploading "+item.name)
-			e = l.Store.PutFile(ctx, key, path, "application/zip")
-			keys[item.name] = key
-		}
-		os.Remove(path)
-		if e != nil {
-			return manifest, e
-		}
+	return nil
+}
+func (w WebRuntime) Deploy(ctx context.Context, r domain.Request, p domain.Package) (manifest domain.Manifest, err error) {
+	if r.WebRoleARN == "" {
+		return manifest, fmt.Errorf("LAMBDA_WEB_ROLE_ARN is not configured")
 	}
-	if p.CacheDir != "" {
-		if err = l.Store.UploadDirectory(ctx, p.CacheDir, cachePrefix); err != nil {
-			return manifest, err
-		}
+	if r.Architecture != "arm64" {
+		return manifest, fmt.Errorf("native Web Functions require ARM64")
 	}
-	template, params, err := RuntimeTemplate(r.UserEnv)
+	file, err := os.CreateTemp("", "launchpad-web-*.zip")
 	if err != nil {
 		return manifest, err
 	}
-	values := map[string]string{"ArtifactBucket": r.Bucket, "AssetPrefix": "__outputs/" + r.ProjectID + "/" + r.DeploymentID, "CachePrefix": cachePrefix, "Architecture": r.Architecture}
-	if boundary := os.Getenv("LAMBDA_PERMISSIONS_BOUNDARY_ARN"); boundary != "" {
-		values["RuntimePermissionsBoundary"] = boundary
+	name := file.Name()
+	file.Close()
+	defer os.Remove(name)
+	if err = ZipDirectory(p.ServerDir, name, 512*1024*1024); err != nil {
+		return manifest, err
 	}
-	// New accounts commonly have only ten concurrent executions and cannot
-	// reserve capacity while retaining AWS's ten unreserved executions.
-	limits, limitErr := l.Lambda.GetAccountSettings(ctx, &lambda.GetAccountSettingsInput{})
-	if limitErr != nil {
-		return manifest, fmt.Errorf("check Lambda account quota: %w", limitErr)
+	key := "__artifacts/" + r.ProjectID + "/" + r.DeploymentID + "/web.zip"
+	w.Log("deploy", "info", "", "Uploading Node.js Web Function package")
+	if err = w.Store.PutFile(ctx, key, name, "application/zip"); err != nil {
+		return manifest, err
 	}
-	if limits.AccountLimit != nil && aws.ToInt32(limits.AccountLimit.UnreservedConcurrentExecutions) <= 10 {
-		values["ReservedConcurrency"] = "0"
-		l.Log("deploy", "warn", "", "Account quota prevents reserving Lambda concurrency; using the account's shared concurrency limit")
+	function := FunctionName(r.ProjectID, r.DeploymentID)
+	env := map[string]string{"NODE_ENV": "production", "NEXT_TELEMETRY_DISABLED": "1"}
+	for k, v := range r.UserEnv {
+		env[k] = v
 	}
-	for key, v := range keys {
-		values[key] = v
-	}
-	if v := os.Getenv("LAMBDA_RESERVED_CONCURRENCY"); v != "" {
-		if n, e := strconv.Atoi(v); e != nil || n < 0 || n > 10 {
-			return manifest, fmt.Errorf("invalid LAMBDA_RESERVED_CONCURRENCY")
-		}
-		values["ReservedConcurrency"] = v
-	}
-	for k, v := range values {
-		params = append(params, cf.Parameter{ParameterKey: aws.String(k), ParameterValue: aws.String(v)})
-	}
-	_, err = l.CloudFormation.CreateStack(ctx, &cloudformation.CreateStackInput{StackName: aws.String(stack), TemplateBody: aws.String(template), Parameters: params, Capabilities: []cf.Capability{cf.CapabilityCapabilityIam}, OnFailure: cf.OnFailureDelete, Tags: []cf.Tag{{Key: aws.String("Application"), Value: aws.String("LaunchPad")}, {Key: aws.String("Deployment"), Value: aws.String(r.DeploymentID)}}})
+	env["NODE_ENV"] = "production"
+	_, err = w.Client.CreateWebFunction(ctx, &lambdaweb.CreateWebFunctionInput{
+		FunctionName: aws.String(function),
+		Tags:         map[string]string{"Application": "LaunchPad", "Project": r.ProjectID, "Deployment": r.DeploymentID},
+		RevisionConfig: &web.RevisionConfig{
+			BuildConfig:   &web.BuildConfig{CodeConfig: &web.CodeConfig{S3Object: &web.S3Object{Bucket: aws.String(r.Bucket), Key: aws.String(key)}}, RuntimeConfig: &web.RuntimeConfig{Runtime: aws.String("nodejs24.x")}},
+			ServiceConfig: &web.ServiceConfig{ExecutionRoleArn: aws.String(r.WebRoleARN), TimeoutSeconds: aws.Int32(30), MaxConcurrencyPerEnvironment: aws.Int32(16), EnvironmentVariables: env, TelemetryConfig: &web.TelemetryConfig{LoggingConfig: &web.LoggingConfig{LogGroup: aws.String("/launchpad/web")}}},
+		},
+		// New endpoint per build; publishing the manifest is the health gate.
+		EndpointConfig: &web.EndpointConfig{EndpointName: aws.String("live"), EndpointType: web.EndpointTypeHomeRegion, AuthType: web.AuthTypeIamAuth, AutoDeploymentMode: web.AutoDeploymentModeLatestRevision},
+	})
 	if err != nil {
-		return manifest, fmt.Errorf("create deployment stack: %w", err)
+		return manifest, fmt.Errorf("create Lambda Web Function: %w", err)
 	}
 	ready := false
 	defer func() {
 		if !ready {
 			cleanup, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			if _, e := l.CloudFormation.DeleteStack(cleanup, &cloudformation.DeleteStackInput{StackName: aws.String(stack)}); e != nil {
-				l.Log("deploy", "warn", "", "Failed deployment stack needs cleanup: "+stack)
+			if _, e := w.Client.DeleteWebFunction(cleanup, &lambdaweb.DeleteWebFunctionInput{FunctionName: aws.String(function)}); e != nil {
+				w.Log("deploy", "warn", "", "Failed Web Function needs cleanup: "+function)
 			}
 		}
 	}()
-	// Poll through the SDK waiter, with a separate heartbeat for a quiet stack.
-	waitDone := make(chan error, 1)
-	go func() {
-		waitDone <- cloudformation.NewStackCreateCompleteWaiter(l.CloudFormation, func(o *cloudformation.StackCreateCompleteWaiterOptions) {
-			o.MinDelay = 5 * time.Second
-			o.MaxDelay = 10 * time.Second
-		}).Wait(ctx, &cloudformation.DescribeStacksInput{StackName: aws.String(stack)}, 8*time.Minute)
-	}()
-	ticker := time.NewTicker(15 * time.Second)
-	defer ticker.Stop()
-waiting:
+	delay := w.PollInterval
+	if delay <= 0 {
+		delay = 5 * time.Second
+	}
 	for {
-		select {
-		case e := <-waitDone:
-			if e != nil {
-				return manifest, fmt.Errorf("deployment stack %s failed: %s: %w", stack, StackFailure(l.CloudFormation, stack), e)
+		out, e := w.Client.GetWebFunctionEndpoint(ctx, &lambdaweb.GetWebFunctionEndpointInput{FunctionName: aws.String(function), EndpointName: aws.String("live")})
+		if e != nil {
+			return manifest, fmt.Errorf("read Web Function endpoint: %w", e)
+		}
+		if out.State == web.EndpointStateFailed {
+			reasons := []string{aws.ToString(out.StateReason)}
+			for region, regional := range out.RegionalEndpoints {
+				reasons = append(reasons, region+": "+aws.ToString(regional.StateReason))
 			}
-			break waiting
-		case <-ticker.C:
-			l.Log("deploy", "info", "", "Waiting for Lambda stack "+stack)
-		case <-ctx.Done():
-			return manifest, ctx.Err()
-		}
-	}
-	output, e := l.CloudFormation.DescribeStacks(ctx, &cloudformation.DescribeStacksInput{StackName: aws.String(stack)})
-	if e != nil {
-		return manifest, e
-	}
-	if len(output.Stacks) != 1 {
-		return manifest, fmt.Errorf("deployment stack output missing")
-	}
-	manifest = domain.Manifest{Version: 1, ProjectID: r.ProjectID, DeploymentID: r.DeploymentID, Target: p.Target, Region: r.Region, StackName: stack, Runtime: "nodejs24.x", Architecture: r.Architecture, AdapterVersion: p.AdapterVersion, NextVersion: p.NextVersion}
-	var table string
-	for _, o := range output.Stacks[0].Outputs {
-		switch aws.ToString(o.OutputKey) {
-		case "ServerFunction":
-			manifest.ServerFunction = aws.ToString(o.OutputValue)
-		case "ServerURL":
-			manifest.ServerURL = aws.ToString(o.OutputValue)
-		case "ImageFunction":
-			manifest.ImageFunction = aws.ToString(o.OutputValue)
-		case "TagCacheTable":
-			table = aws.ToString(o.OutputValue)
-		}
-	}
-	seed := filepath.Join(filepath.Dir(filepath.Dir(p.ServerDir)), "dynamodb-provider", "dynamodb-cache.json")
-	if e = l.seedTags(ctx, table, seed); e != nil {
-		return manifest, e
-	}
-	// Active infrastructure alone does not prove Next.js can start.
-	event := map[string]any{"version": "2.0", "routeKey": "$default", "rawPath": "/", "rawQueryString": "", "headers": map[string]string{"host": "localhost", "x-forwarded-proto": "https"}, "requestContext": map[string]any{"http": map[string]string{"method": "GET", "path": "/", "sourceIp": "127.0.0.1", "protocol": "HTTP/1.1"}}, "isBase64Encoded": false}
-	payload, _ := json.Marshal(event)
-	invocation, e := l.Lambda.Invoke(ctx, &lambda.InvokeInput{FunctionName: aws.String(manifest.ServerFunction), Payload: payload})
-	if e != nil {
-		return manifest, fmt.Errorf("runtime health request: %w", e)
-	}
-	if invocation.FunctionError != nil {
-		return manifest, fmt.Errorf("runtime health invocation failed; see CloudWatch logs for %s", stack)
-	}
-	var response struct {
-		StatusCode int `json:"statusCode"`
-	}
-	if json.Unmarshal(invocation.Payload, &response) != nil || response.StatusCode < 200 || response.StatusCode >= 500 {
-		return manifest, fmt.Errorf("runtime health request returned HTTP %d", response.StatusCode)
-	}
-	l.Log("deploy", "info", "", fmt.Sprintf("Lambda health check passed (HTTP %d)", response.StatusCode))
-	ready = true
-	return manifest, nil
-}
-
-func (l LambdaRuntime) seedTags(ctx context.Context, table, path string) error {
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	var raw []map[string]map[string]string
-	if err = json.Unmarshal(b, &raw); err != nil {
-		return fmt.Errorf("invalid OpenNext initial tag cache: %w", err)
-	}
-	seen := map[string]bool{}
-	var writes []db.WriteRequest
-	for _, row := range raw {
-		key := row["tag"]["S"] + "\x00" + row["path"]["S"]
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		item := map[string]db.AttributeValue{}
-		for k, v := range row {
-			if s, ok := v["S"]; ok {
-				item[k] = &db.AttributeValueMemberS{Value: s}
-			} else if n, ok := v["N"]; ok {
-				item[k] = &db.AttributeValueMemberN{Value: n}
-			}
-		}
-		writes = append(writes, db.WriteRequest{PutRequest: &db.PutRequest{Item: item}})
-	}
-	for len(writes) > 0 {
-		n := 25
-		if n > len(writes) {
-			n = len(writes)
-		}
-		batch := writes[:n]
-		writes = writes[n:]
-		for attempt := 0; len(batch) > 0; attempt++ {
-			if attempt >= 5 {
-				return fmt.Errorf("tag cache initialization remained throttled")
-			}
-			out, e := l.DynamoDB.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{RequestItems: map[string][]db.WriteRequest{table: batch}})
-			if e != nil {
-				return e
-			}
-			batch = out.UnprocessedItems[table]
-			if len(batch) > 0 {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
+			if reader, ok := w.Client.(interface {
+				GetWebFunctionRevision(context.Context, *lambdaweb.GetWebFunctionRevisionInput, ...func(*lambdaweb.Options)) (*lambdaweb.GetWebFunctionRevisionOutput, error)
+			}); ok {
+				for _, weight := range out.RevisionWeights {
+					if revision, e := reader.GetWebFunctionRevision(ctx, &lambdaweb.GetWebFunctionRevisionInput{FunctionName: aws.String(function), RevisionId: weight.RevisionId}); e == nil {
+						reasons = append(reasons, aws.ToString(revision.StateReason))
+					}
 				}
 			}
+			return manifest, fmt.Errorf("Web Function endpoint failed: %s", strings.Join(reasons, "; "))
+		}
+		if out.State == web.EndpointStateActive {
+			endpoint := "https://" + aws.ToString(out.DomainName)
+			if !ValidWebEndpoint(endpoint) {
+				return manifest, fmt.Errorf("invalid Web Function endpoint hostname")
+			}
+			if err = w.health(ctx, r, endpoint); err != nil {
+				return manifest, err
+			}
+			w.Log("deploy", "info", "", "Native HTTP server passed readiness and application health checks")
+			ready = true
+			return domain.Manifest{Version: 2, ProjectID: r.ProjectID, DeploymentID: r.DeploymentID, Target: p.Target, Region: r.Region, FunctionName: function, EndpointURL: endpoint, Runtime: "nodejs24.x", Architecture: "arm64", NextVersion: p.NextVersion}, nil
+		}
+		w.Log("deploy", "info", "", "Waiting for Web Function endpoint "+function)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return manifest, ctx.Err()
+		case <-timer.C:
 		}
 	}
-	return nil
 }

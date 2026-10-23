@@ -11,8 +11,6 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /build-server ./cmd/bui
 FROM node:24-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install --global @opennextjs/aws@4.1.12 && npm cache clean --force
-ENV OPEN_NEXT_BINARY=/usr/local/bin/open-next
 WORKDIR /home/app
 RUN mkdir /home/app/work && chown -R node:node /home/app
 COPY --from=compiler /build-server /usr/local/bin/build-server
