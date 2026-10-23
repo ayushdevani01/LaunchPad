@@ -67,6 +67,27 @@ test('backend-only Node projects route every method and path to their HTTP serve
   await request('/hello'); await request('/hello', { method: 'DELETE' })
   assert.equal(calls.forwards.length, 2); assert.equal(calls.assets.length, 0)
 })
+
+test('static generated pages resolve HTML files and directory indexes before SPA fallback', async t => {
+  const files = new Map([
+    ['__outputs/demo/deployment/index.html', 'home'],
+    ['__outputs/demo/deployment/about/index.html', 'about'],
+    ['__outputs/demo/deployment/contact.html', 'contact']
+  ])
+  const { request, calls } = setup(t, {
+    resolve: async () => ({ slug: 'demo', deploymentId: 'deployment', runtime: { target: 'static' } }),
+    asset: async key => {
+      calls.assets.push(key)
+      if (!files.has(key)) throw Object.assign(new Error(), { name: 'NoSuchKey' })
+      return { body: Readable.from(files.get(key)), contentType: 'text/html' }
+    }
+  })
+  for (const path of ['/about', '/about/']) assert.equal((await request(path)).body.toString(), 'about')
+  assert.equal((await request('/contact')).body.toString(), 'contact')
+  assert.equal((await request('/client/settings', { headers: { accept: 'text/html' } })).body.toString(), 'home')
+  assert.equal((await request('/missing.js')).status, 404)
+  assert.equal(calls.forwards.length, 0)
+})
 test('routing refuses arbitrary origins, malformed paths and internal health routes', async t => {
   const { request, calls } = setup(t, { resolve: async () => ({ slug: 'demo', deploymentId: 'deployment', runtime: { ...runtime, endpointUrl: 'https://attacker.on.aws' } }) })
   assert.equal((await request('/api/hello')).status, 503)

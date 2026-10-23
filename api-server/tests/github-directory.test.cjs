@@ -139,3 +139,17 @@ test('Node server detection supports Express and Hono without inventing a build 
     })
   }
 })
+
+test('Next static-export detection accepts compact and multiline configuration', async () => {
+  for (const config of ["export default {output:'export'}", 'export default { output:\n "export" }']) {
+    await withAPI(async url => {
+      const contents = url.endsWith('/package.json') ? JSON.stringify({ dependencies: { next: '16' } }) : config
+      return { data: { encoding: 'base64', content: Buffer.from(contents).toString('base64') } }
+    }, async request => {
+      const response = await request('/detect?owner=owner&repo=repo&branch=main')
+      const { detection } = await response.json()
+      assert.equal(detection.framework, 'Next.js (Static Export)')
+      assert.equal(detection.outputDir, 'out')
+    })
+  }
+})

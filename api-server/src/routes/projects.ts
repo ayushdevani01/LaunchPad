@@ -79,7 +79,7 @@ async function detectFramework(owner: string, repo: string, pathStr: string, bra
             for (const name of configNames) {
                 try {
                     const configContent = await getFileContent(`${basePath}${name}`)
-                    if (configContent.includes("output: 'export'") || configContent.includes('output: "export"')) {
+                    if (/\boutput\s*:\s*['"]export['"]/.test(configContent)) {
                         hasStaticExport = true
                         break
                     }

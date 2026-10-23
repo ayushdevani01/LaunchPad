@@ -48,8 +48,20 @@ export function createApp(deps: ProxyDependencies) {
                 try { asset = await deps.asset(prefix + (path === '/' ? '/index.html' : path)) }
                 catch (error: any) {
                     if ((!spa && web) || !['NoSuchKey', 'NotFound'].includes(error.name)) throw error
-                    if (!(req.headers.accept || '').includes('text/html')) return res.status(404).send('Not found')
-                    asset = await deps.asset(prefix + '/index.html')
+                    // Static generators emit either /page.html or /page/index.html.
+                    // Resolve those pages before falling back to a client-side router.
+                    const htmlPaths = path.endsWith('/') ? [path + 'index.html'] :
+                        !path.split('/').pop()?.includes('.') ? [path + '.html', path + '/index.html'] : []
+                    for (const htmlPath of htmlPaths) {
+                        try { asset = await deps.asset(prefix + htmlPath); break }
+                        catch (pageError: any) {
+                            if (!['NoSuchKey', 'NotFound'].includes(pageError.name)) throw pageError
+                        }
+                    }
+                    if (!asset) {
+                        if (!(req.headers.accept || '').includes('text/html')) return res.status(404).send('Not found')
+                        asset = await deps.asset(prefix + '/index.html')
+                    }
                 }
                 if (asset.contentType) res.setHeader('Content-Type', asset.contentType)
                 if (asset.cacheControl) res.setHeader('Cache-Control', asset.cacheControl)
