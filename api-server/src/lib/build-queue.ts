@@ -1,6 +1,8 @@
 import { Kafka, logLevel, Producer } from 'kafkajs'
 import { Deployment } from '../models/Deployment'
 import { Project } from '../models/Project'
+import { githubReportFor } from './github-deployments'
+import mongoose from 'mongoose'
 
 export const BUILD_TOPIC = process.env.KAFKA_BUILD_TOPIC || 'launchpad.deployments'
 export const BUILD_GROUP = 'launchpad-build-dispatcher-v1'
@@ -37,7 +39,9 @@ export function parseBuildMessage(value: string): BuildMessage {
 export async function enqueueDeployment(project: any, commitHash: string, trigger: 'manual' | 'push' = 'manual') {
     if (!/^[a-f0-9]{40}$/.test(commitHash)) throw new Error('A verified source commit is required')
     let deployment
-    try { deployment = await Deployment.create({ projectId: project._id, status: 'PENDING', commitHash, trigger }) }
+    const id = new mongoose.Types.ObjectId()
+    try { deployment = await Deployment.create({ _id: id, projectId: project._id, status: 'PENDING', commitHash, trigger,
+        githubReport: githubReportFor(project, id.toString()) }) }
     catch (err: any) {
         if (trigger !== 'push' || err.code !== 11000) throw err
         deployment = await Deployment.findOne({ projectId: project._id, commitHash, trigger })

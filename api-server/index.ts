@@ -9,6 +9,7 @@ import projectRoutes from './src/routes/projects'
 import { startReconciler } from './src/lib/reconciler'
 import { startBuildPublisher } from './src/lib/build-queue'
 import { startGitHubEvents } from './src/lib/github-events'
+import { startGitHubDeploymentReporter } from './src/lib/github-deployments'
 import githubWebhookRoutes from './src/routes/github-webhook'
 import githubRoutes from './src/routes/github'
 import buildWorkerRoutes from './src/routes/build-worker'
@@ -56,11 +57,12 @@ connectDB()
         startReconciler()
         const stopPublisher = startBuildPublisher()
         const stopEvents = startGitHubEvents()
+        const stopReports = startGitHubDeploymentReporter()
         const server = app.listen(PORT, () => console.log(`API Server running on port ${PORT}`))
         process.once('SIGTERM', () => {
             stopEvents()
             setTimeout(() => process.exit(1), 25000).unref()
-            void Promise.all([stopPublisher(), new Promise<void>(resolve => server.close(() => resolve()))])
+            void Promise.all([stopPublisher(), stopReports(), new Promise<void>(resolve => server.close(() => resolve()))])
                 .then(() => mongoose.disconnect()).then(() => process.exit(0))
         })
     })
