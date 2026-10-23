@@ -33,6 +33,16 @@ function load(file, globals = {}) {
 }
 const session = load("session.ts");
 const form = load("deployment-form.ts");
+const history = load("deployment-history.ts");
+
+test("GitHub log links select the requested deployment without replacing an active user selection", () => {
+  const builds = [{ _id: "newest" }, { _id: "previous" }];
+  assert.equal(history.selectDeployment(builds, null, "previous"), "previous");
+  assert.equal(history.selectDeployment(builds, "newest", "previous"), "newest");
+  assert.equal(history.selectDeployment(builds, null, "missing"), "newest");
+  assert.equal(history.selectDeployment(builds, "previous", "previous", true), "newest");
+  assert.equal(history.selectDeployment([], null, "previous"), null);
+});
 const token = (payload) =>
   "header." +
   Buffer.from(JSON.stringify(payload)).toString("base64url") +

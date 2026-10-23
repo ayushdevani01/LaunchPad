@@ -34,6 +34,7 @@ import {
 } from "@/lib/api";
 import { absoluteTime, relativeTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/cn";
+import { selectDeployment } from "@/lib/deployment-history";
 
 const ACTIVE = new Set(["BUILDING", "PENDING"]);
 
@@ -70,11 +71,8 @@ function ProjectBody() {
         if (signal?.aborted || sequence !== loadSequence.current) return;
         setProject(nextProject);
         setDeployments(nextDeployments);
-        setSelectedId((current) =>
-          !selectLatest && nextDeployments.some((item) => item._id === current)
-            ? current
-            : (nextDeployments[0]?._id ?? null),
-        );
+        const requested = new URLSearchParams(window.location.search).get("deployment");
+        setSelectedId(current => selectDeployment(nextDeployments, current, requested, selectLatest));
         setError("");
       } catch (cause) {
         if (signal?.aborted || sequence !== loadSequence.current) return;
