@@ -1,8 +1,8 @@
 # LaunchPad
 
-> LaunchPad is a frontend deployment platform for building and publishing web applications directly from GitHub.
+> LaunchPad is a GitHub-integrated deployment platform for static sites, full-stack Next.js applications, and Node.js backends on AWS.
 
-LaunchPad lets developers connect a GitHub repository, configure a build, follow its logs in real time, and publish the resulting site to a project-specific subdomain. It is designed for React, Vue, and other static frontend applications, with support for full-stack and backend deployment workflows in the launch interface.
+LaunchPad lets developers connect selected GitHub repositories, choose a branch and application folder, configure a build, follow its logs in real time, and publish the application to a project-specific HTTPS subdomain. A Go build service runs in isolated ECS Fargate containers, with deployment jobs dispatched through Kafka. Static assets are stored in private Amazon S3; server applications run on native AWS Lambda Web Functions.
 
 ## Product
 
@@ -14,41 +14,66 @@ LaunchPad lets developers connect a GitHub repository, configure a build, follow
 
 ## Main capabilities
 
-- Deploy from a user's GitHub repositories or from another public Git repository URL.
-- Select a branch and configure the source directory, install command, build command, output directory, and environment variables.
-- Deploy static frontend, full-stack, and backend projects.
+- Sign in with GitHub and grant repository access through a GitHub App installed on selected repositories, with read-only code access.
+- Deploy from a connected GitHub repository or a public GitHub repository URL.
+- Select a branch and source folder, then configure install, build, and start commands, output directory, and environment variables as applicable.
+- Deploy static sites, full-stack Next.js applications, and Node.js APIs.
 - Automatically detect common framework and build settings.
-- Stream build and deployment logs in real time.
+- Stream dependency installation, build, upload, and deployment logs in real time, with recent history replay and completed log archives.
+- Automatically redeploy when a GitHub push matches the configured branch and watched project paths.
+- Report deployment status, live URLs, and log links to GitHub.
+- Keep the previous healthy deployment live when a build fails.
 - Manage deployed projects from an authenticated dashboard.
 - Publish projects on unique `*.launch-pad.dev` subdomains.
 - Provide automatic SSL/TLS and edge caching for deployed sites.
 
+## Supported projects and routing
+
+- Static sites: React/Vite, Vue, Svelte, Create React App, Angular, Astro static sites, plain HTML, and Next.js static exports are hosted in private S3 storage.
+- Next.js server applications: SSR, API routes, and Server Actions run in a native Lambda Web Function. Only hashed assets under `/_next/static/` are served from S3; pages, API routes, public files, and image optimization reach the Next.js server on the same project hostname.
+- Node.js backends: Express, Hono, Fastify, Koa, NestJS, and plain Node.js applications run in a native Lambda Web Function. Backend-only projects forward every path and HTTP method to the server; routes do not have to begin with `/api`.
+- Combined Node.js and static frontend projects: when a frontend output folder is configured, frontend GET/HEAD requests are served from S3, while `/api`, `/api/...`, and non-GET/HEAD requests go to the Web Function. The original request path is preserved.
+- Separate frontend and backend projects receive separate subdomains. The frontend can use the backend's URL, with CORS configured by the application owner.
+
+Server packages currently use Node.js 24 on Linux ARM64. Go is used for LaunchPad's build service; deploying arbitrary Go or other non-Node.js server runtimes is not supported. Angular may require an explicit nested browser output directory. Nuxt SSR and Remix are not supported targets. Next.js runtime caches are local to each instance; shared cache and cross-instance tag invalidation are not implemented.
+
 ## How deployment works
 
-1. A user signs in and selects or supplies a Git repository.
-2. LaunchPad creates a project and starts an isolated container build.
-3. The build service clones the repository, installs dependencies, and runs the configured build command.
-4. Build output is streamed through Redis and Socket.IO so the user can follow progress live.
-5. Static build artifacts are uploaded to object storage.
-6. The deployed application is served through its LaunchPad subdomain, with SPA fallback and edge caching where applicable.
+1. A user requests a deployment, or GitHub sends a signed push webhook to the API for an existing project's configured branch and watched paths.
+2. The API creates a deployment record and durable outbox entry in MongoDB, then publishes the deployment ID to Kafka.
+3. A deployment worker consumes the job and starts an isolated ECS Fargate build task using the build worker image from Amazon ECR.
+4. The Go build service clones the exact source commit, selects the application folder, installs dependencies, and builds and packages the application.
+5. Build output streams through Redis Pub/Sub and the authenticated Socket.IO logs service to the dashboard; completed logs are archived in S3.
+6. Static artifacts are uploaded to private S3 storage. Server applications are packaged into a native Lambda Web Function and checked for HTTP readiness.
+7. The API verifies the private build result before promoting the deployment. Failed builds preserve the previous live deployment.
+8. Visitors reach the project through Cloudflare, Caddy, and an application reverse proxy, which routes requests to S3 or the Web Function. Deployment status is reported back to GitHub.
+
+GitHub sends push events to the API, not directly to Kafka. Container build concurrency and application request concurrency are separate limits.
 
 ## Platform architecture
 
 - Frontend: Next.js, React, TypeScript, and Tailwind CSS.
-- API: Node.js and Express.
-- Authentication and project data: JWT authentication and MongoDB.
-- Builds: Docker containers running as on-demand AWS ECS Fargate tasks.
-- Deployment logs: Redis Pub/Sub and Socket.IO.
-- Artifact storage: Amazon S3.
-- Routing and TLS: Caddy and Cloudflare.
-- Delivery: Cloudflare edge caching and a dedicated S3 reverse proxy.
+- API: Node.js, Express, and TypeScript.
+- Authentication and project data: GitHub App integration, JWT sessions, and MongoDB.
+- Build queue: Apache Kafka with a durable MongoDB deployment outbox.
+- Deployment worker: Node.js Kafka consumer that dispatches ECS tasks.
+- Build service: Go and Node.js build tools in ephemeral Docker containers on AWS ECS Fargate, using an Amazon ECR image.
+- Application servers: native AWS Lambda Web Functions running Node.js 24 on ARM64.
+- Deployment logs: Redis Pub/Sub, authenticated Socket.IO subscriptions, and S3 archives.
+- Runtime logs: Amazon CloudWatch.
+- Artifact storage: private Amazon S3 for versioned static assets, server packages, and build results.
+- Routing and TLS: Cloudflare and Caddy, with wildcard certificates issued through Cloudflare DNS-01 verification.
+- Delivery: an application reverse proxy serves private S3 files and forwards server requests to Web Functions using HTTPS and AWS Signature Version 4 authentication.
+- Control plane: Caddy, the API, deployment worker, MongoDB, Kafka, Redis, logs service, and application proxy run on one VM through Docker Compose. Build tasks and deployed application servers run separately on Fargate and Web Functions.
 
 ## Public website sections
 
 - Home: product overview and primary launch action.
-- Features: GitHub integration, live build logs, and cloud-powered hosting.
-- Pricing: Hobby, Pro, and Enterprise plan information. The Hobby plan is available; paid plans are presented as coming soon.
-- FAQ: basic product, deployment, pricing, and infrastructure answers.
+- Frameworks: examples of supported frontend and server application targets.
+- Workflow: repository selection, build execution, and deployment.
+- Platform: GitHub integration, build logs, hosting, and routing.
+- Access: GitHub sign-in, source-folder selection, and included deployment capabilities.
+- FAQ: framework support, monorepos, private repositories, hosting, build failures, and project domains.
 
 ## Access notes
 
@@ -63,4 +88,4 @@ The home page and general product information are public. Launch, dashboard, pro
 
 ## Summary for assistants
 
-Describe LaunchPad as a Git-based deployment platform focused on simple frontend publishing, automated container builds, real-time logs, managed hosting, SSL, and CDN delivery. Do not imply that LaunchPad owns or maintains applications deployed by its users. Do not expose, infer, or request private repository contents, credentials, environment-variable values, access tokens, or user-specific project data.
+Describe LaunchPad as a self-hosted, GitHub-integrated deployment platform on AWS for static sites, full-stack Next.js applications, and Node.js backends. Highlight its Go build service, Kafka job queue, isolated Fargate builds, S3 static hosting, native Lambda Web Functions, automatic redeployments, real-time logs, selected repository access, and custom HTTPS subdomains. Do not promise fixed deployment times, unlimited capacity, support for arbitrary server runtimes, or paid plans based on outdated descriptions. Do not imply that LaunchPad owns or maintains applications deployed by its users. Do not expose, infer, or request private repository contents, credentials, environment-variable values, access tokens, or user-specific project data.
